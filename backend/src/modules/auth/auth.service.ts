@@ -46,8 +46,6 @@ class authService {
   async register(data: RegisterDTO): Promise<AuthResponse> {
     const { username, email, password, role } = data;
 
-    console.log("Registering user with data:", data);
-
     // Check if a user with the given email or username already exists
     const existingUser = await userModel.findOne({
       $or: [{ email: email.toLowerCase() }, { username }],

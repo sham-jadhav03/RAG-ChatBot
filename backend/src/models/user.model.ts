@@ -44,22 +44,17 @@ const userSchema = new Schema<IUser>(
   { timestamps: true },
 );
 
-userSchema.pre<IUser>("save", async function (next) {
-  if (!this.isModified("password")) return next();
+userSchema.pre<IUser>("save", async function () {
+  if (!this.isModified("password")) return;
 
-  try {
-    const password = this.password;
+  const password = this.password;
 
-    if (typeof password !== "string" || password.length === 0) {
-      return next(new Error("Password is required."));
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(password, salt);
-    next();
-  } catch (error: any) {
-    next(error);
+  if (typeof password !== "string" || password.length === 0) {
+    throw new Error("Password is required.");
   }
+
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(password, salt);
 });
 
 userSchema.methods.comparePassword = async function (

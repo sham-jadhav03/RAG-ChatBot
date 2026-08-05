@@ -6,8 +6,6 @@ export async function register(req: Request, res: Response, next: NextFunction):
   try {
     const { username, email, password, role } = req.body;
 
-    console.log("Register request body:", req.body); 
-
     if (!username || !email || !password) {
       res.status(400).json({
         success: false,
