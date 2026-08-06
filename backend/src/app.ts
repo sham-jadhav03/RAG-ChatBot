@@ -14,7 +14,9 @@ app.get("/", (req: Request, res: Response) => {
 });
 
 import authRoutes from "./modules/auth/auth.routes";
+import documentRoutes from "./modules/documents/document.routes";
 
 app.use("/api/auth", authRoutes);
+app.use("/api/documents", documentRoutes);
 
 export default app;

@@ -69,9 +69,9 @@ const documentSchema = new Schema<IDocument>(
 documentSchema.index({ createdAt: -1 });
 
 // 4. Model Export
-const DocumentModel: Model<IDocument> = mongoose.model<IDocument>(
+const documentModel: Model<IDocument> = mongoose.model<IDocument>(
   "Document",
   documentSchema,
 );
 
-export default DocumentModel;
+export default documentModel;
