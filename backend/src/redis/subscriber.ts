@@ -35,7 +35,7 @@ redisSubscriber.on("message", async (channel, message) => {
     const payload = JSON.parse(message);
 
     // 1. python PDF processing completed Response Listener
-    if (channel === REDIS_CHANNELS.PDF_CHAT_RESPONSES) {
+    if (channel === REDIS_CHANNELS.PDF_PROCESS_RESPONSES) {
       const { documentId, status, errorMessage } = payload;
 
       if (documentId) {
