@@ -1,38 +1,45 @@
 import os
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
 
-class Settings(BaseSettings):
-    #Server Settings
-    PORT: int = 8000
-    ENV: str = "development"
-
-    #Redis Config
-    REDIS_HOST: str ="localhost"
-    REDIS_PORT: int = 6379
-    REDIS_PASSWORD: str = ""
-
-    # Redis Channels (Matching Node.js Backend)
-    REDIS_PDF_PROCESS_REQUEST_CHANNEL: str = "pdf_process_requests"
-    REDIS_PDF_PROCESS_RESPONSE_CHANNEL: str = "pdf_process_responses"
-    REDIS_CHAT_REQUEST_CHANNEL: str = "chat_requests"
-    REDIS_CHAT_RESPONSE_CHANNEL: str = "chat_responses"
-
-    # Database & AI Keys
-    MONGO_URI: str = "mongodb://localhost:27017/rag_database"
-    OPENAI_API_KEY: str = ""
-    GEMINI_API_KEY: str = ""
-
-    # Storage Directories
-    CHROMA_DB_DIR: str = "./chroma_data"
-    TEMP_UPLOAD_DIR: str = "./uploads"
-
-    # Pydantic v2 Config
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+# Load .env file from project root
+load_dotenv()
 
 
-# Export singleton settings instance
-settings = Settings()
+class Config:
+    """Application configuration from environment variables"""
+
+    # Redis configuration
+    REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+
+    # MONGO_URI configuration
+    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/rag_database")
+
+    # CHROMA configuration
+    CHROMA_PATH = os.getenv("CHROMA_PATH", "./chroma_data")
+
+    # PDF Processing Configuration
+    CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))
+    CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
+
+    # chat configuration
+    TOP_K_RETRIEVAL = int(os.getenv("TOP_K_RETRIEVAL", "5"))
+
+    # FastAPI Configuration
+    FASTAPI_HOST = os.getenv("FASTAPI_HOST", "0.0.0.0")
+    FASTAPI_PORT = int(os.getenv("FASTAPI_PORT", "8000"))
+    FASTAPI_RELOAD = os.getenv("FASTAPI_RELOAD", "True").lower() == "true"
+
+    @classmethod
+    def validate(cls):
+        """Validate critical configuration"""
+        if not cls.REDIS_URL:
+            raise ValueError("Missing REDIS_URL in .env")
+
+
+# Validate on import
+Config.validate()
+
+# Export instance for use in other modules
+config = Config()
+
+__all__ = ["Config", "config"]
