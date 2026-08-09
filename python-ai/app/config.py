@@ -29,11 +29,32 @@ class Config:
     FASTAPI_PORT = int(os.getenv("FASTAPI_PORT", "8000"))
     FASTAPI_RELOAD = os.getenv("FASTAPI_RELOAD", "True").lower() == "true"
 
+    # Logger configuration
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
     @classmethod
     def validate(cls):
         """Validate critical configuration"""
         if not cls.REDIS_URL:
             raise ValueError("Missing REDIS_URL in .env")
+
+        if not cls.MONGO_URI:
+            raise ValueError("Missing MONGO_URI in .env")
+
+        if cls.CHUNK_SIZE <= 0:
+            raise ValueError("CHUNK_SIZE must be greater than 0")
+
+        if cls.CHUNK_OVERLAP < 0:
+            raise ValueError("CHUNK_OVERLAP cannot be negative")
+
+        if cls.CHUNK_OVERLAP >= cls.CHUNK_SIZE:
+            raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_SIZE")
+
+        if cls.TOP_K_RETRIEVAL <= 0:
+            raise ValueError("TOP_K_RETRIEVAL must be greater than 0")
+
+        if not 1 <= cls.FASTAPI_PORT <= 65535:
+            raise ValueError("FASTAPI_PORT must be between 1 and 65535")
 
 
 # Validate on import

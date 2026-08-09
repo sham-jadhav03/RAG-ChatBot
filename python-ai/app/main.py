@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 
-from config import config
+from app.config import config
 
 logging.basicConfig(
     level= config.LOG_LEVEL,
@@ -19,8 +19,11 @@ async def start_redis_worker():
     """Start the Redis listener in the background"""
     try:
         logger.info("Starting redis worker")
-        from redis_worker import listern_to_redis
-        await listern_to_redis()
+
+        from app.redis.redis_worker import listen_to_redis
+
+        await listen_to_redis()
+
     except Exception as e:
         logger.error(f"Redis worker crashed: {e}", exc_info=True)
         raise
@@ -28,8 +31,10 @@ async def start_redis_worker():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle startup and shutdown events"""
+
     global redis_worker_task
     redis_worker_task = asyncio.create_task(start_redis_worker())
+    
     logger.info("Application started, Redis Worker is running")
     try:
         yield
