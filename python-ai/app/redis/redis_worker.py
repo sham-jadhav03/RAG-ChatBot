@@ -28,8 +28,17 @@ class RedisWorker:
             # Test connection
             await self.redis_client.ping()
             logger.info(f"Connected to Redis: {config.REDIS_URL}")
-        except Exception:
-            logger.exception("Failed to connect to Redis")
+
+            # Separate client for publishing
+            self.publisher = await redis.from_url(
+                config.REDIS_URL,
+                encoding="utf-8",
+                decode_responses=True,
+            )
+            logger.info("Redis publisher initialized")
+
+        except Exception as e:
+            logger.exception(f"Failed to connect to Redis: {e}")
             raise
 
     async def subscribe_to_channels(self):
@@ -74,42 +83,139 @@ class RedisWorker:
             Args:
                 payload: Message from pdf_process_requests channel
         """
+        document_id = payload.get("documentId")
+        file_path = payload.get("filePath")
+        file_name = payload.get("fileName")
+
+        logger.info(f"PDF process request: {document_id} - {file_name}")
+
+
         try:
-            document_id = payload.get("documentId")
-            file_path = payload.get("filePath")
-            file_name = payload.get("fileName")
+            # Import here to avoid circular dependencies
+            from app.ingestion.pdf_processor import get_processor
+            from app.ingestion.embedder import get_embedder
+            from app.vector.chroma_client import get_vector_store
+            from app.db.mongo_client import get_mongo_client
 
-            logger.info(f"PDF process request: {document_id} - {file_name}")
-            logger.debug(f" File path: {file_path}")
+            # Get service instances
+            pdf_processor = get_processor(
+                chunk_size=config.CHUNK_SIZE,
+                chunk_overlap=config.CHUNK_OVERLAP,
+            )
+            embedder = get_embedder()
+            vectore_store = get_vector_store(path=config.CHROMA_PATH)
+            mongo_client =get_mongo_client()
 
-      # 8 - Replace with actual PDF processing pipeline
-            # For now, just log and send success response
+            # Step 1: Load and chunk PDF
+            logger.info("step: 1/4: Loading and chunking pdf...")
+            chunks, token_count = await pdf_processor.process_pdf(file_path)
+
+            if not chunks:
+                raise ValueError("No chunks extracted from pdf")
+
+            # step 2: Generate embeddings
+            logger.info("step 2/4: Generating embedding...")
+            embeddings, chunks = await embedder.embed_documents(chunks)
+
+            if not embeddings:
+                raise ValueError("No embeddings generated")
+
+             # Step 3: Store in Chroma
+            logger.info("Step 3/4: Storing in vector database...")
+            storage_result = await vectore_store.store_embeddings(
+                document_id=document_id,
+                chunks=chunks,
+                embeddings=embeddings
+            )
+
+            # Step 4: Update MongoDB status
+            logger.info("Step 4/4: Updating MongoDB...")
+            await mongo_client.mark_processing_complete(
+                document_id=document_id,
+                chunks_count=len(chunks),
+                tokens_count=token_count,
+            )
+
+            # Send success response
             response = {
                 "type": "process_pdf_response",
                 "documentId": document_id,
                 "status": "completed",
-                "chunksCreated": 0,
-                "embeddingsGenerated": 0,
-                "totalTokens": 0,
+                "chunksCreated": len(chunks),
+                "embeddingsGenerated": len(embeddings),
+                "totalTokens": token_count,
                 "error": None,
-                "timestamp": None  # Will be set in Phase 8
+                "timestamp": None,  
             }
+
             
             await self.publish_response("pdf_process_responses", response)
             logger.info(f"PDF response published for {document_id}")
             
-        except Exception as e:
-            logger.error(f"Error handling PDF request: {e}", exc_info=True)
+        except FileNotFoundError as e:
+            logger.error(f"PDF file not found: {e}")
+            error_msg = f"PDF file not found: {file_path}"
+
+            # update Mongo with error
+            from app.db.mongo_client import get_mongo_client
+            mongo_client = get_mongo_client()
+            await mongo_client.mark_processing_failed(document_id, error_msg)
+
             # Send error response
             await self.publish_response("pdf_process_responses", {
                 "type": "process_pdf_response",
-                "documentId": payload.get("documentId", "unknown"),
+                "documentId": document_id,
                 "status": "failed",
                 "chunksCreated": 0,
                 "embeddingsGenerated": 0,
                 "totalTokens": 0,
-                "error": str(e),
+                "error": error_msg,
                 "timestamp": None
+            })
+
+        except ValueError as e:
+            logger.error(f"Validation error: {e}")
+            error_msg = str(e)
+            
+            # Update MongoDB
+            from app.db.mongo_client import get_mongo_client
+            mongo_client = get_mongo_client()
+            await mongo_client.mark_processing_failed(document_id, error_msg)
+            
+            # Send error response
+            await self.publish_response("pdf_process_responses", {
+                "type": "process_pdf_response",
+                "documentId": document_id,
+                "status": "failed",
+                "chunksCreated": 0,
+                "embeddingsGenerated": 0,
+                "totalTokens": 0,
+                "error": error_msg,
+                "timestamp": None,
+            })
+            
+        except Exception as e:
+            logger.error(f"Unexpected error processing PDF: {e}", exc_info=True)
+            error_msg = f"Unexpected error: {str(e)}"
+            
+            # Update MongoDB
+            try:
+                from app.db.mongo_client import get_mongo_client
+                mongo_client = get_mongo_client()
+                await mongo_client.mark_processing_failed(document_id, error_msg)
+            except:
+                logger.warning("Could not update MongoDB with error")
+            
+            # Send error response
+            await self.publish_response("pdf_process_responses", {
+                "type": "process_pdf_response",
+                "documentId": document_id,
+                "status": "failed",
+                "chunksCreated": 0,
+                "embeddingsGenerated": 0,
+                "totalTokens": 0,
+                "error": error_msg,
+                "timestamp": None,
             })
 
     async def handle_chat_request(self, payload: Dict[str, Any]):
