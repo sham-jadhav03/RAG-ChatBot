@@ -31,7 +31,7 @@ class ChromaVectorStore:
                 anonymized_telemetry=False,
             )
 
-            self.client = chromadb.Client(settings)
+            self.client = chromadb.PersistentClient(path=self.path)
 
             logger.info(f"Chroma initialized at: {self.path}")
 
@@ -56,13 +56,11 @@ class ChromaVectorStore:
         try:
             collection = self.client.get_or_create_collection(
                 name=collection_name,
-                metadata={"hnsw: space": "cosine"}
+                metadata={"hnsw:space": "cosine"}
             )
 
             logger.info(f"Collection ready: {collection_name}")
-            
             return collection
-            
         except Exception as e:
             logger.error(f"Error creating collection: {e}")
             raise

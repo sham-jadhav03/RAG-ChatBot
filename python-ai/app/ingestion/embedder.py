@@ -1,6 +1,6 @@
 import logging
 from typing import List, Tuple
-from langchain_openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.documents import Document
 
 from config import config
@@ -22,9 +22,10 @@ class EmbeddingGenerator:
         try:
             logger.info(f"Initializing embeddings with model: {self.model}")
 
-            self.embeddings = OpenAIEmbeddings(
+            self.embeddings = GoogleGenerativeAIEmbeddings(
                 model=self.model,
-                api_key=config.OPENAI_API_KEY,
+                api_key=config.GOOGLE_API_KEY,
+                output_dimensionality=768,
             ) 
 
             logger.info(f"Embeddings initialized: {self.model}")
@@ -50,36 +51,39 @@ class EmbeddingGenerator:
             raise ValueError("No chunks provided for embedding")
 
         try:
-             logger.info(f"Generating embeddings for {len(chunks)} chunks...")
+            logger.info(f"Generating embeddings for {len(chunks)} chunks...")
 
-             # Extract text from chunks
-             texts = [chunks.page_content for chunk in chunks]
+            # Extract text from chunks
+            texts = [
+                f"title: {chunk.metadata.get('source_filename', 'non')} | "
+                f"text:{chunk.page_content}"
+                for chunk in chunks
+            ]
 
-             # Generate embeddings
-             # Note: OpenAI Embedding are blocking, we call them directly
+            # Generate embeddings
+            # Note: GOOGLE GEMINI Embedding are blocking, we call them directly
+            embeddings = await self.embeddings.embed_documents(texts)
 
-             embeddings = self.embeddings.embed_documents(texts)
+            if not embeddings:
+                raise ValueError("No embedding generated")
 
-             if not embeddings:
-                 raise ValueError("No embedding generated")
-
-             if len(embeddings) != len(chunks):
-                 raise ValueError(
+            if len(embeddings) != len(chunks):
+                raise ValueError(
                     f"Embedding count mismatch: "
                     f"expected {len(chunks)}, got {len(embeddings)}"
                 )
-            
-                 logger.info(
+
+            logger.info(
                 f"Generated {len(embeddings)} embeddings "
                 f"(dimension: {len(embeddings[0])})"
-                )
+            )
 
-               # Add embedding metadata to chunks
-                for chunk,  embedding in zip(chunks, embeddings):
-                 chunk.metadata["embedding_model"] = self.model
-                 chunk.metadata["embedding_dimension"] = len(embedding)
+            # Add embedding metadata to chunks
+            for chunk, embedding in zip(chunks, embeddings):
+                chunk.metadata["embedding_model"] = self.model
+                chunk.metadata["embedding_dimension"] = len(embedding)
 
-                 return embeddings, chunks
+            return embeddings, chunks
 
         except Exception as e:
             logger.error(f"Error generating embeddings: {e}", exc_info=True)

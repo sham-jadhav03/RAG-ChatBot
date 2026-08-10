@@ -19,7 +19,7 @@ class MongoDBClient:
         from pymongo import MongoClient
         from config import config
         
-        self.uri = uri or config.MONGODB_URI
+        self.uri = uri or config.MONGO_URI
         
         try:
             logger.info(f"🔧 Connecting to MongoDB...")
