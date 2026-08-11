@@ -21,8 +21,14 @@ class Config:
     CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))
     CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 
-    # chat configuration
+    # Chat configuration
     TOP_K_RETRIEVAL = int(os.getenv("TOP_K_RETRIEVAL", "5"))
+
+    # Google / Gemini AI configuration
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")  # alias used by embedder
+    LLM_MODEL = os.getenv("LLM_MODEL", "gemini-1.5-flash")
+    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/embedding-001")
 
     # FastAPI Configuration
     FASTAPI_HOST = os.getenv("FASTAPI_HOST", "0.0.0.0")
@@ -52,6 +58,9 @@ class Config:
 
         if cls.TOP_K_RETRIEVAL <= 0:
             raise ValueError("TOP_K_RETRIEVAL must be greater than 0")
+
+        if not cls.GEMINI_API_KEY and not cls.GOOGLE_API_KEY:
+            raise ValueError("Missing GEMINI_API_KEY or GOOGLE_API_KEY in .env")
 
         if not 1 <= cls.FASTAPI_PORT <= 65535:
             raise ValueError("FASTAPI_PORT must be between 1 and 65535")

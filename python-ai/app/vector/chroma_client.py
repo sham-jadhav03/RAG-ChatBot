@@ -1,10 +1,9 @@
 import logging
 from typing import List, Dict, Any, Tuple
 import chromadb
-from chromadb.config import Settings
 from langchain_core.documents import Document
 
-from config import config
+from app.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +22,6 @@ class ChromaVectorStore:
 
         try:
             logger.info(f"Initializing Chroma at: {self.path}")
-
-            # Create persistent Chroma client
-            settings = Settings(
-                chroma_db_impl = "duckdb+parquet",
-                persist_directory=self.path,
-                anonymized_telemetry=False,
-            )
 
             self.client = chromadb.PersistentClient(path=self.path)
 

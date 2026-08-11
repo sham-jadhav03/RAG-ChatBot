@@ -1,7 +1,7 @@
 import logging
 from langgraph.graph import StateGraph
-from state import ChatState
-from nodes import retrieve_node, generate_node, suggest_node
+from .state import ChatState
+from .Node import retrieve_node, generate_node, suggest_node
 
 logger = logging.getLogger(__name__)
 

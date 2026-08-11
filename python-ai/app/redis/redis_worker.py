@@ -223,6 +223,11 @@ class RedisWorker:
         Args:
             payload: Message from chat_requests channel
         """
+        request_id = None
+        session_id = None
+        question = None
+        conversation_history = []
+
         try:
             request_id = payload.get("requestId")
             session_id = payload.get("sessionId")
@@ -307,7 +312,7 @@ class RedisWorker:
             
         else:
             logger.warning(
-                f"nknown message type '{message_type}' on channel '{channel}'"
+                f"Unknown message type '{message_type}' on channel '{channel}'"
             )
  
     async def listen_forever(self):

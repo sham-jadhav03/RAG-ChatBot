@@ -1,9 +1,10 @@
+import asyncio
 import logging
 from typing import List, Tuple
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.documents import Document
 
-from config import config
+from app.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -102,15 +103,16 @@ class EmbeddingGenerator:
         try:
             if not query or not query.strip():
                 raise ValueError("Query text is empty")
-            
+
             logger.debug(f"🔍 Embedding query: {query[:50]}...")
 
-            embedding = self.embeddings.embed_query(query)
+            # embed_query is synchronous — run in a thread to avoid blocking the event loop
+            embedding = await asyncio.to_thread(self.embeddings.embed_query, query)
 
             logger.debug(f"✅ Query embedded (dimension: {len(embedding)})")
-            
+
             return embedding
-            
+
         except Exception as e:
             logger.error(f"❌ Error embedding query: {e}", exc_info=True)
             raise ValueError(f"Query embedding failed: {str(e)}")

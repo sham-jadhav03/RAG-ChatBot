@@ -5,11 +5,6 @@ from contextlib import asynccontextmanager
 
 from app.config import config
 
-logging.basicConfig(
-    level= config.LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-
 logger = logging.getLogger(__name__)
 
 # Global reference to redis worker task
@@ -82,10 +77,10 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
  
-    logger.info(f"🌍 Starting server on {config.FASTAPI_HOST}:{config.FASTAPI_PORT}")
+    logger.info(f"Starting server on {config.FASTAPI_HOST}:{config.FASTAPI_PORT}")
     
     uvicorn.run(
-        "main:app",
+        "app.main:app",
         host=config.FASTAPI_HOST,
         port=config.FASTAPI_PORT,
         reload=config.FASTAPI_RELOAD,

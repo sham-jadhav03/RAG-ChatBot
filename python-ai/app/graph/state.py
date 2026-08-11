@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
 class ChatState(BaseModel):
@@ -18,4 +18,4 @@ class ChatState(BaseModel):
     # output 
     suggested_questions: List[str] = []
     sources: List[Dict[str, Any]] = []
-    error: str = None
+    error: Optional[str] = None

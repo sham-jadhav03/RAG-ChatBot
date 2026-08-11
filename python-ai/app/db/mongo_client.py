@@ -1,7 +1,11 @@
+import asyncio
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 from bson import ObjectId
+from pymongo import MongoClient
+
+from app.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -16,25 +20,22 @@ class MongoDBClient:
         Args:
             uri: MongoDB connection URI
         """
-        from pymongo import MongoClient
-        from config import config
-        
         self.uri = uri or config.MONGO_URI
-        
+
         try:
             logger.info(f"🔧 Connecting to MongoDB...")
-            
+
             self.client = MongoClient(self.uri, serverSelectionTimeoutMS=5000)
-            
+
             # Test connection
             self.client.admin.command("ping")
-            
+
             # Get database and collection
             self.db = self.client.get_database()
             self.documents_collection = self.db.get_collection("documents")
-            
+
             logger.info(f"MongoDB connected")
-            
+
         except Exception as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
             raise
@@ -73,8 +74,9 @@ class MongoDBClient:
                 update_data.update(details)
             
             logger.info(f"Updating {doc_id}: {status}")
-            
-            result = self.documents_collection.update_one(
+
+            result = await asyncio.to_thread(
+                self.documents_collection.update_one,
                 {"_id": doc_id},
                 {"$set": update_data},
             )
@@ -162,7 +164,9 @@ class MongoDBClient:
             else:
                 doc_id = document_id
             
-            document = self.documents_collection.find_one({"_id": doc_id})
+            document = await asyncio.to_thread(
+                self.documents_collection.find_one, {"_id": doc_id}
+            )
             
             return document
             

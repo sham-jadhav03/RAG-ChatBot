@@ -1,11 +1,12 @@
+import asyncio
 import logging
 import os
 from typing import List, Tuple
 from pathlib import Path
 
-from langchain.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,9 @@ class PDFProcessor:
                 f"Loading PDF: {file_path} ({file_size / 1024 / 1024:.2f} MB)"
             )
 
-            # Load pdf
+            # Load PDF (synchronous — run in thread to avoid blocking event loop)
             loader = PyPDFLoader(file_path)
-            documents = loader.load()
+            documents = await asyncio.to_thread(loader.load)
 
             if not documents:
                 raise ValueError(f"PDF has no content: {file_path}")
@@ -106,7 +107,8 @@ class PDFProcessor:
         try:
             logger.info(f"Chunking {len(documents)} documents...")
 
-            chunks = self.splitter.split_documents(documents)
+            # split_documents is synchronous — run in thread
+            chunks = await asyncio.to_thread(self.splitter.split_documents, documents)
 
             logger.info(f"Created {len(chunks)} chunks")
 
