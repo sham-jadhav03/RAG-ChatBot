@@ -1,39 +1,38 @@
 # FastAPI & Web Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
 
-# Redis (Pub/Sub Communication)
-redis==5.0.1
+# Redis (Pub/Sub Communication & Caching)
+redis>=5.0.1
 
 # Environment Variable Management
-python-dotenv==1.0.0
+python-dotenv>=1.0.0
 
-# LangChain Core & Integrations
-langchain-core==0.1.13
-langchain-community==0.0.13
-langchain-text-splitters==0.0.1
+# LangChain Core, Extensions & Integrations
+langchain>=0.2.0
+langchain-core>=0.2.0
+langchain-community>=0.2.0
+langchain-text-splitters>=0.2.0
 
 # LangGraph (Workflow Orchestration)
-langgraph==0.0.25
+langgraph>=0.1.0
 
-# Vector Database
-chroma-db==0.4.13
+# Vector Database (Corrected PyPI package name)
+chromadb>=0.5.0
 
-# PDF Processing
-pypdf==3.17.1
+# PDF & Document Processing
+pypdf>=4.0.0
 
 # MongoDB (Document Storage)
-pymongo==4.6.0
+pymongo>=4.6.0
 
-# Development & Testing (Optional)
-pytest==7.4.3
-pytest-asyncio==0.21.1
-httpx==0.25.2
+# Testing & Utilities
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+httpx>=0.27.0
+aiohttp>=3.9.1
 
-# Async HTTP Client (for testing)
-aiohttp==3.9.1
-
-# Production Server (Optional, if not using Uvicorn)
-gunicorn==21.2.0
+# Production Server (Optional)
+gunicorn>=21.2.0

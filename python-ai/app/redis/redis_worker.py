@@ -61,7 +61,6 @@ class RedisWorker:
     async def publish_response(self, channel: str, message: Dict[str, Any]):
         """
             Publish a response message to a channel
-            
             Args:
                 channel: Redis channel name
                 message: Message dict to publish
@@ -221,7 +220,6 @@ class RedisWorker:
     async def handle_chat_request(self, payload: Dict[str, Any]):
         """
         Handle chat/RAG request
-        
         Args:
             payload: Message from chat_requests channel
         """
@@ -229,31 +227,62 @@ class RedisWorker:
             request_id = payload.get("requestId")
             session_id = payload.get("sessionId")
             question = payload.get("question")
+            conversation_history = payload.get("conversationHistory", [])
             
             logger.info(f"Chat Request: {request_id[:8]}... - {question[:50]}...")
             logger.debug(f"   Session: {session_id}")
-            
-            # Phase 9 - Replace with actual LangGraph workflow
-            # For now, just log and send placeholder response
-            response = {
-                "type": "ask_question_response",
-                "requestId": request_id,
-                "answer": "Placeholder response - LangGraph not implemented yet",
-                "sources": [],
-                "suggestedQuestions": [],
-                "error": None,
-                "timestamp": None  # Will be set in Phase 9
-            }
-            
-            await self.publish_response("chat_responses", response)
-            logger.info(f"Chat response published for {request_id[:8]}...")
-            
+
+            try:
+                # Import LangGraph
+                from app.graph.build_graph import invoke_rag_graph
+
+                # Invoke RAG workflow
+                logger.info("Step 1/3: Retrieving context...")
+                logger.info("Step 2/3: Generating answer...")
+                logger.info("Step 3/3: Generating suggestions...")
+
+                final_state = await invoke_rag_graph(
+                    question=question,
+                    session_id=session_id,
+                    history=conversation_history,
+                )
+
+                # Check for errors
+                if final_state.error:
+                    raise ValueError(final_state.error)
+
+                # Format response
+                response = {
+                    "type": "ask_question_response",
+                    "requestId": request_id,
+                    "answer": final_state.answer,
+                    "sources": final_state.sources,
+                    "suggestedQuestions": final_state.suggested_questions,
+                    "error": None,
+                    "timestamp": None  # Will be set in Phase 9
+                }
+
+                await self.publish_response("chat_responses", response)
+                logger.info(f"Chat response published for {request_id[:8]}...")
+
+            except ValueError as e:
+                logger.error(f"Validation error: {e}")
+                await self.publish_response("chat_responses", {
+                    "type": "ask_question_response",
+                    "requestId": request_id,
+                    "answer": None,
+                    "sources": [],
+                    "suggestedQuestions": [],
+                    "error": str(e),
+                    "timestamp": None,
+                })
+
         except Exception as e:
             logger.error(f"Error handling chat request: {e}", exc_info=True)
             # Send error response
             await self.publish_response("chat_responses", {
                 "type": "ask_question_response",
-                "requestId": payload.get("requestId", "unknown"),
+                "requestId": request_id,
                 "answer": None,
                 "sources": [],
                 "suggestedQuestions": [],
@@ -264,7 +293,6 @@ class RedisWorker:
     async def route_message(self, channel: str, payload: Dict[str, Any]):
         """
         Route incoming message to appropriate handler based on channel
-        
         Args:
             channel: Redis channel name
             payload: Parsed JSON payload
