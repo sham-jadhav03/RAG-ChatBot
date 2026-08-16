@@ -36,12 +36,13 @@ class PDFProcessor:
             f"PDFProcessor initialized: chunk_size={chunk_size}, overlap={chunk_overlap}"
         )
 
-    async def load_pdf(self, file_path: str) -> List[Document]:
+    async def load_pdf(self, file_path: str, original_filename: str = None) -> List[Document]:
         """
         Load PDF file and extract text
 
         Args:
-            file_path: Path to PDF file
+            file_path: Path to PDF file (local path or remote URL)
+            original_filename: Original filename to preserve in metadata
 
         Returns:
             List of Document objects with text content
@@ -50,23 +51,44 @@ class PDFProcessor:
             FileNotFoundError: If file doesn't exist
             ValueError: If file is not a valid PDF
         """
+        is_url = file_path.startswith("http://") or file_path.startswith("https://")
+        temp_file_path = None
+        loader_path = file_path
+
         try:
-            # Check file exists
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"PDF file not found: {file_path}")
+            if is_url:
+                import tempfile
+                import httpx
+                logger.info(f"Downloading remote PDF from: {file_path}")
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(file_path, follow_redirects=True, timeout=30.0)
+                    response.raise_for_status()
+                    content = response.content
 
-            # Check file is readable
-            if not os.access(file_path, os.R_OK):
-                raise PermissionError(f"Cannot read PDF file: {file_path}")
+                if not content.startswith(b"%PDF"):
+                    raise ValueError("Downloaded file content does not start with PDF magic bytes (%PDF)")
 
-            # Get file size
-            file_size = os.path.getsize(file_path)
-            logger.info(
-                f"Loading PDF: {file_path} ({file_size / 1024 / 1024:.2f} MB)"
-            )
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
+                    temp_file.write(content)
+                    temp_file_path = temp_file.name
+                loader_path = temp_file_path
+            else:
+                # Check file exists
+                if not os.path.exists(file_path):
+                    raise FileNotFoundError(f"PDF file not found: {file_path}")
+
+                # Check file is readable
+                if not os.access(file_path, os.R_OK):
+                    raise PermissionError(f"Cannot read PDF file: {file_path}")
+
+                # Get file size
+                file_size = os.path.getsize(file_path)
+                logger.info(
+                    f"Loading PDF: {file_path} ({file_size / 1024 / 1024:.2f} MB)"
+                )
 
             # Load PDF (synchronous — run in thread to avoid blocking event loop)
-            loader = PyPDFLoader(file_path)
+            loader = PyPDFLoader(loader_path)
             documents = await asyncio.to_thread(loader.load)
 
             if not documents:
@@ -77,7 +99,7 @@ class PDFProcessor:
             # Add metadata: original file path
             for doc in documents:
                 doc.metadata["source_file"] = file_path
-                doc.metadata["source_filename"] = Path(file_path).name
+                doc.metadata["source_filename"] = original_filename or (Path(file_path).name if not is_url else "document.pdf")
 
             return documents
 
@@ -93,6 +115,14 @@ class PDFProcessor:
         except Exception as e:
             logger.error(f"Error loading PDF: {e}", exc_info=True)
             raise ValueError(f"Failed to load PDF: {str(e)}")
+
+        finally:
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                    logger.info(f"Deleted temp PDF file: {temp_file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete temp PDF file {temp_file_path}: {e}")
 
     async def chunk_documents(self, documents: List[Document]) -> List[Document]:
         """
@@ -123,19 +153,20 @@ class PDFProcessor:
             logger.error(f"Error chunking documents: {e}", exc_info=True)
             raise
 
-    async def process_pdf(self, file_path: str) -> Tuple[List[Document], int]:
+    async def process_pdf(self, file_path: str, original_filename: str = None) -> Tuple[List[Document], int]:
         """
         Complete pipeline: load PDF and chunk text
 
         Args:
             file_path: Path to PDF file
+            original_filename: Original filename to preserve in metadata
 
         Returns:
             Tuple of (chunks list, total token count estimate)
         """
         try:
             # Load pdf
-            documents = await self.load_pdf(file_path)
+            documents = await self.load_pdf(file_path, original_filename=original_filename)
 
             # Chunk documents
             chunks = await self.chunk_documents(documents)

@@ -88,13 +88,13 @@ class RedisWorker:
 
         logger.info(f"PDF process request: {document_id} - {file_name}")
 
-
         try:
             # Import here to avoid circular dependencies
             from app.ingestion.pdf_processor import get_processor
             from app.ingestion.embedder import get_embedder
             from app.vector.chroma_client import get_vector_store
             from app.db.mongo_client import get_mongo_client
+            from datetime import datetime
 
             # Get service instances
             pdf_processor = get_processor(
@@ -103,11 +103,15 @@ class RedisWorker:
             )
             embedder = get_embedder()
             vectore_store = get_vector_store(path=config.CHROMA_PATH)
-            mongo_client =get_mongo_client()
+            mongo_client = get_mongo_client()
+
+            # Step 0: Set MongoDB status to PROCESSING
+            logger.info("Step 0/4: Setting status to PROCESSING...")
+            await mongo_client.update_processing_status(document_id, "PROCESSING")
 
             # Step 1: Load and chunk PDF
             logger.info("step: 1/4: Loading and chunking pdf...")
-            chunks, token_count = await pdf_processor.process_pdf(file_path)
+            chunks, token_count = await pdf_processor.process_pdf(file_path, original_filename=file_name)
 
             if not chunks:
                 raise ValueError("No chunks extracted from pdf")
@@ -139,15 +143,14 @@ class RedisWorker:
             response = {
                 "type": "process_pdf_response",
                 "documentId": document_id,
-                "status": "completed",
+                "status": "COMPLETED",
                 "chunksCreated": len(chunks),
                 "embeddingsGenerated": len(embeddings),
                 "totalTokens": token_count,
                 "error": None,
-                "timestamp": None,  
+                "timestamp": datetime.utcnow().isoformat() + "Z",  
             }
 
-            
             await self.publish_response("pdf_process_responses", response)
             logger.info(f"PDF response published for {document_id}")
             
@@ -157,6 +160,7 @@ class RedisWorker:
 
             # update Mongo with error
             from app.db.mongo_client import get_mongo_client
+            from datetime import datetime
             mongo_client = get_mongo_client()
             await mongo_client.mark_processing_failed(document_id, error_msg)
 
@@ -164,12 +168,12 @@ class RedisWorker:
             await self.publish_response("pdf_process_responses", {
                 "type": "process_pdf_response",
                 "documentId": document_id,
-                "status": "failed",
+                "status": "FAILED",
                 "chunksCreated": 0,
                 "embeddingsGenerated": 0,
                 "totalTokens": 0,
                 "error": error_msg,
-                "timestamp": None
+                "timestamp": datetime.utcnow().isoformat() + "Z"
             })
 
         except ValueError as e:
@@ -178,6 +182,7 @@ class RedisWorker:
             
             # Update MongoDB
             from app.db.mongo_client import get_mongo_client
+            from datetime import datetime
             mongo_client = get_mongo_client()
             await mongo_client.mark_processing_failed(document_id, error_msg)
             
@@ -185,12 +190,12 @@ class RedisWorker:
             await self.publish_response("pdf_process_responses", {
                 "type": "process_pdf_response",
                 "documentId": document_id,
-                "status": "failed",
+                "status": "FAILED",
                 "chunksCreated": 0,
                 "embeddingsGenerated": 0,
                 "totalTokens": 0,
                 "error": error_msg,
-                "timestamp": None,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
             })
             
         except Exception as e:
@@ -206,15 +211,16 @@ class RedisWorker:
                 logger.warning("Could not update MongoDB with error")
             
             # Send error response
+            from datetime import datetime
             await self.publish_response("pdf_process_responses", {
                 "type": "process_pdf_response",
                 "documentId": document_id,
-                "status": "failed",
+                "status": "FAILED",
                 "chunksCreated": 0,
                 "embeddingsGenerated": 0,
                 "totalTokens": 0,
                 "error": error_msg,
-                "timestamp": None,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
             })
 
     async def handle_chat_request(self, payload: Dict[str, Any]):

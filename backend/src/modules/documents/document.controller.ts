@@ -45,7 +45,7 @@ export async function listContoller(
 ): Promise<void> {
   try {
     const search = req.query.search as string;
-    const page = req.query.page ? parseInt(req.query.limit as string) : 1;
+    const page = req.query.page ? parseInt(req.query.page as string) : 1;
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
 
     const result = await documentService.getDocuments({ search, page, limit });

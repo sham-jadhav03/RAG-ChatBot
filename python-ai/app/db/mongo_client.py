@@ -118,7 +118,7 @@ class MongoDBClient:
         
         return await self.update_processing_status(
             document_id=document_id,
-            status="ready",  # After vectorization, ready for queries
+            status="COMPLETED",  # After vectorization, ready for queries
             details=details,
         )
 
@@ -144,7 +144,7 @@ class MongoDBClient:
         
         return await self.update_processing_status(
             document_id=document_id,
-            status="failed",
+            status="FAILED",
             details=details,
         )
 

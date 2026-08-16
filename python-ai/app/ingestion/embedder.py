@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from typing import List, Tuple
+# pyrefly: ignore [missing-import]
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.documents import Document
 

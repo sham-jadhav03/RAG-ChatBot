@@ -61,6 +61,7 @@ class documentService {
 
     // 3. Publish Redis Event for Python AI Microservice
     const payload = JSON.stringify({
+      type: "process_pdf",
       documentId: document._id,
       filePath: document.filePath,
       fileName: document.fileName,
