@@ -56,13 +56,14 @@ def get_rag_graph():
     return _graph
 
 
-async def invoke_rag_graph(question: str, session_id: str, history: list) -> ChatState:
+async def invoke_rag_graph(question: str, session_id: str, history: list, document_id: str = "") -> ChatState:
     """
     Run the RAG workflow
     Args:
         question: User question
         session_id: Session ID
         history: Conversation history    
+        document_id: Document ID for vector collection search
     Returns:
         Final ChatState with answer + suggestions
     """
@@ -74,6 +75,7 @@ async def invoke_rag_graph(question: str, session_id: str, history: list) -> Cha
         state = ChatState(
             question=question,
             session_id=session_id,
+            document_id=document_id,
             conversation_history=history,
         )
 
@@ -91,6 +93,7 @@ async def invoke_rag_graph(question: str, session_id: str, history: list) -> Cha
         return ChatState(
             question=question,
             session_id=session_id,
+            document_id=document_id,
             answer="An error occurred processing your question",
             error=str(e),
         )

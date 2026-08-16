@@ -290,25 +290,31 @@ class RedisWorker:
         """
         Handle chat/RAG request
         Args:
-            payload: Message from chat_requests channel
+            payload: Message from pdf_chat_requests channel
         """
         request_id = None
         session_id = None
+        document_id = None
         question = None
         conversation_history = []
 
         try:
             request_id = payload.get("requestId")
             session_id = payload.get("sessionId")
+            document_id = payload.get("documentId") or ""
             question = payload.get("question")
             conversation_history = payload.get("conversationHistory", [])
             
-            logger.info(f"Chat Request: {request_id[:8]}... - {question[:50]}...")
+            logger.info(
+                f"Chat Request: {request_id[:8] if request_id else 'none'}... - "
+                f"doc: {document_id} - {question[:50] if question else ''}..."
+            )
             logger.debug(f"   Session: {session_id}")
 
             try:
                 # Import LangGraph
                 from app.graph.build_graph import invoke_rag_graph
+                from datetime import datetime
 
                 # Invoke RAG workflow
                 logger.info("Step 1/3: Retrieving context...")
@@ -319,6 +325,7 @@ class RedisWorker:
                     question=question,
                     session_id=session_id,
                     history=conversation_history,
+                    document_id=document_id,
                 )
 
                 # Check for errors
@@ -333,14 +340,15 @@ class RedisWorker:
                     "sources": final_state.sources,
                     "suggestedQuestions": final_state.suggested_questions,
                     "error": None,
-                    "timestamp": None  # Will be set in Phase 9
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
                 }
 
                 await self.publish_response("pdf_chat_responses", response)
-                logger.info(f"Chat response published for {request_id[:8]}...")
+                logger.info(f"Chat response published for {request_id[:8] if request_id else 'none'}...")
 
             except ValueError as e:
                 logger.error(f"Validation error: {e}")
+                from datetime import datetime
                 await self.publish_response("pdf_chat_responses", {
                     "type": "ask_question_response",
                     "requestId": request_id,
@@ -348,12 +356,13 @@ class RedisWorker:
                     "sources": [],
                     "suggestedQuestions": [],
                     "error": str(e),
-                    "timestamp": None,
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
                 })
 
         except Exception as e:
             logger.error(f"Error handling chat request: {e}", exc_info=True)
             # Send error response
+            from datetime import datetime
             await self.publish_response("pdf_chat_responses", {
                 "type": "ask_question_response",
                 "requestId": request_id,
@@ -361,7 +370,7 @@ class RedisWorker:
                 "sources": [],
                 "suggestedQuestions": [],
                 "error": str(e),
-                "timestamp": None
+                "timestamp": datetime.utcnow().isoformat() + "Z",
             })
  
     async def route_message(self, channel: str, payload: Dict[str, Any]):

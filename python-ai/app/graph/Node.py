@@ -48,15 +48,16 @@ async def retrieve_node(state: ChatState) -> ChatState:
         # Generate embedding for the question
         query_embedding = await embedder.embed_query(state.question)
 
-        # Search Chroma using session_id as the collection name
+        # Search Chroma using document_id as collection name (fallback to session_id if empty)
+        search_target = state.document_id if state.document_id else state.session_id
         try:
             results = await vector_store.search(
-                document_id=state.session_id,
+                document_id=search_target,
                 query_embedding=query_embedding,
                 top_k=config.TOP_K_RETRIEVAL,
             )
         except Exception:
-            logger.warning(f"No vectors found for session {state.session_id}")
+            logger.warning(f"No vectors found for document/session {search_target}")
             results = []
 
         state.retrieved_docs = results
@@ -96,7 +97,6 @@ async def retrieve_node(state: ChatState) -> ChatState:
 async def generate_node(state: ChatState) -> ChatState:
     """
     Node 2: Generate answer using LLM.
-
     Takes context + question → calls Gemini → returns answer.
     """
     try:

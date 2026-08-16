@@ -7,6 +7,7 @@ class ChatState(BaseModel):
     # Input
     question: str
     session_id: str
+    document_id: str = ""
     conversation_history: List[Dict[str, str]] = []
 
     retrieved_docs: List[Dict[str, Any]] = []
