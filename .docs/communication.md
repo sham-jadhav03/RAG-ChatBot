@@ -1,166 +1,362 @@
 # Architectural Communication Guide: Node.js Backend & Python AI Service
 
-This document defines the communication protocols, channels, message schemas, and architecture used to link the **Node.js Express Backend** and the **Python FastAPI AI Service**. It also identifies the current alignment gaps in the repository and provides concrete steps to resolve them.
+> **Last verified:** 2026-08-16\
+> **Current status:** ✅ Node.js ↔ Python AI communication established
+> and Stage 1 PDF ingestion verified end-to-end.
 
----
+This document defines the communication protocols, Redis channels,
+message contracts, architecture, and verification status for the
+**Node.js Express Backend** and **Python FastAPI AI Service**.
 
-## 1. Communication Architecture Overview
+------------------------------------------------------------------------
 
-To achieve clean decoupling, the RAG Chatbot architecture uses a **hybrid model**:
-1. **HTTP/REST (Synchronous)**: Used for health checks, initial bootstrapping, and direct service monitoring.
-2. **Redis Pub/Sub (Asynchronous)**: Used for event-driven message exchange. This decouples the Node.js server (responsible for client connections, authentication, and HTTP routing) from the Python AI service (responsible for resource-intensive PDF parsing, Google Gemini embedding generation, ChromaDB vector indexing, and LangGraph multi-agent RAG reasoning).
+## 1. Communication Architecture
 
-### Architectural Interaction Flow
+The RAG Chatbot uses a hybrid communication model:
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Client Application
-    participant Express as Node.js Backend (Express)
-    participant Redis as Redis Pub/Sub
-    participant DB as MongoDB
-    participant Python as Python AI Service (FastAPI)
-    participant Vector as Vector DB (Chroma)
+1.  **HTTP/REST (Synchronous)** --- client-facing APIs, health checks,
+    and service monitoring.
+2.  **Redis Pub/Sub (Asynchronous)** --- Node.js ↔ Python AI
+    communication for PDF ingestion and RAG processing.
 
-    Note over User, Python: 📄 Flow A: PDF Upload & Vectorization
-    User->>Express: POST /api/documents/upload (PDF file)
-    activate Express
-    Note over Express: Uploads to ImageKit
-    Express->>DB: Save document metadata (Status: PENDING)
-    Express->>Redis: Publish "pdf_process_requests" (Action: PROCESS)
-    Express-->>User: 201 Created (Upload successful, processing started)
-    deactivate Express
+The Node.js backend owns HTTP routing, authentication, document
+metadata, and client-facing APIs. The Python AI service owns PDF
+processing, embeddings, vector search, and the AI/RAG workflow.
 
-    Redis->>Python: Receive processing event
-    activate Python
-    Note over Python: Updates MongoDB Status to PROCESSING
-    Note over Python: Fetches PDF URL from ImageKit
-    Note over Python: Extracts & chunks text using PyPDFLoader
-    Note over Python: Generates Embeddings using Google Gemini API
-    Python->>Vector: Store vectors in Chroma collection (named by Document ID)
-    Python->>DB: Mark status to COMPLETED (or READY) in MongoDB
-    Python->>Redis: Publish "pdf_process_responses" (Status: COMPLETED)
-    deactivate Python
+### Architectural Flow
 
-    Redis->>Express: Receive completion event
-    activate Express
-    Express->>DB: Update document processing status
-    Express-->>User: (Websocket / UI Poll) Notify Client that document is Ready
-    deactivate Express
-
-    Note over User, Python: 💬 Flow B: RAG Query (LangGraph Workflow)
-    User->>Express: POST /api/chat/ask (Question & Document ID)
-    activate Express
-    Express->>Redis: Publish "pdf_chat_requests" (Question, requestId)
-    deactivate Express
-
-    Redis->>Python: Receive chat request
-    activate Python
-    Note over Python: Python retrieves query embeddings
-    Python->>Vector: Semantic search context from document's Chroma collection
-    Note over Python: LangGraph executes retrieve -> generate -> suggest
-    Python->>Redis: Publish "pdf_chat_responses" (Answer, sources, suggestions, requestId)
-    deactivate Python
-
-    Redis->>Express: Receive chat response
-    activate Express
-    Express-->>User: Send answer to User
-    deactivate Express
+``` text
+                         ┌──────────────────────┐
+                         │      Frontend        │
+                         │      Next.js         │
+                         └──────────┬───────────┘
+                                    │ HTTP
+                                    ▼
+                         ┌──────────────────────┐
+                         │   Node.js Backend    │
+                         │ Express + TypeScript │
+                         └──────────┬───────────┘
+                                    │
+                         Redis Pub/Sub
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │   Python AI Service  │
+                         │ FastAPI + LangChain  │
+                         │      LangGraph      │
+                         └──────────┬───────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    ▼                               ▼
+              ┌───────────┐                   ┌──────────┐
+              │ ChromaDB  │                   │ MongoDB  │
+              └───────────┘                   └──────────┘
 ```
 
----
+------------------------------------------------------------------------
 
-## 2. Pub/Sub Channels Specification
+## 2. Redis Pub/Sub Channels
 
-To avoid communication breakdowns, both services must subscribe and publish to the exact same channel names. 
+Both services use the same Redis instance and the following canonical
+channel names:
 
-| Logical Flow | Channel Name | Publisher | Subscriber | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| **PDF Ingestion** | `pdf_process_requests` | Node.js | Python AI | Triggers PDF chunking, embedding, and vector storage. |
-| **PDF Ingestion Response** | `pdf_process_responses` | Python AI | Node.js | Reports ingestion success/failure and updates metadata. |
-| **RAG Chat Query** | `pdf_chat_requests` | Node.js | Python AI | Sends user queries to the LangGraph AI workflow. |
-| **RAG Chat Response** | `pdf_chat_responses` | Python AI | Node.js | Returns LLM answers, retrieved sources, and suggested follow-ups. |
+  -------------------------------------------------------------------------------------
+  Logical Flow   Channel                   Publisher      Subscriber     Status
+  -------------- ------------------------- -------------- -------------- --------------
+  PDF ingestion  `pdf_process_requests`    Node.js        Python AI      ✅ Verified
+  request                                                                
 
----
+  PDF ingestion  `pdf_process_responses`   Python AI      Node.js        ✅ Verified
+  response                                                               
 
-## 3. JSON Message Schemas
+  RAG chat       `pdf_chat_requests`       Node.js        Python AI      ⏳ Chat E2E
+  request                                                                pending
 
-To ensure message payloads are parsed successfully, the JSON structures must adhere to the schemas defined below.
+  RAG chat       `pdf_chat_responses`      Python AI      Node.js        ⏳ Chat E2E
+  response                                                               pending
+  -------------------------------------------------------------------------------------
 
-### 3.1 PDF Ingestion Requests (`pdf_process_requests`)
+------------------------------------------------------------------------
 
-Every message sent from the Node.js backend must include a `type` and `action` field to route processing logic correctly.
+## 3. PDF Ingestion Contract
 
-#### Schema definition:
-```json
+### 3.1 Request --- `pdf_process_requests`
+
+``` json
 {
   "type": "process_pdf",
-  "action": "PROCESS" | "REPROCESS" | "DELETE",
-  "documentId": "string (MongoDB ObjectId)",
-  "filePath": "string (HTTP/HTTPS URL from ImageKit)",
-  "fileName": "string (Original filename)"
+  "action": "PROCESS",
+  "documentId": "string",
+  "filePath": "https://ik.imagekit.io/...",
+  "fileName": "dummy.pdf"
 }
 ```
 
-*Note: For the `DELETE` action, only the `type`, `action`, and `documentId` fields are required.*
+Supported actions:
 
----
+-   `PROCESS`
+-   `REPROCESS`
+-   `DELETE`
 
-### 3.2 PDF Ingestion Responses (`pdf_process_responses`)
+For `DELETE`, only `type`, `action`, and `documentId` are required.
 
-Sent by the Python AI worker once ingestion is finalized or crashes.
+### 3.2 Response --- `pdf_process_responses`
 
-#### Schema definition:
-```json
+``` json
 {
   "type": "process_pdf_response",
-  "documentId": "string (MongoDB ObjectId)",
-  "status": "COMPLETED" | "FAILED",
-  "chunksCreated": 0,
-  "embeddingsGenerated": 0,
-  "totalTokens": 0,
-  "error": "string | null",
-  "timestamp": "string (ISO 8601 Date)"
+  "documentId": "string",
+  "status": "COMPLETED",
+  "chunksCreated": 1,
+  "embeddingsGenerated": 1,
+  "totalTokens": 3,
+  "error": null,
+  "timestamp": "ISO-8601 timestamp"
 }
 ```
 
----
+------------------------------------------------------------------------
 
-### 3.3 Chat/RAG Requests (`pdf_chat_requests`)
+## 4. PDF Upload & Processing Flow
 
-Sent by Node.js to trigger the LangGraph orchestration.
+``` text
+Client
+  │
+  │ POST /api/documents/upload
+  ▼
+Node.js Backend
+  │
+  ├── Upload PDF → ImageKit
+  ├── Create MongoDB document
+  │      status = PENDING
+  │
+  └── Publish → pdf_process_requests
+                │
+                ▼
+             Python AI
+                │
+                ├── status = PROCESSING
+                ├── Download ImageKit PDF
+                ├── PyPDFLoader
+                ├── Text chunking
+                ├── Gemini embeddings
+                ├── Store vectors in ChromaDB
+                ├── status = COMPLETED
+                │
+                └── Publish → pdf_process_responses
+                                  │
+                                  ▼
+                              Node.js
+                                  │
+                                  └── Update MongoDB
+                                      status = COMPLETED
+```
 
-#### Schema definition:
-```json
+------------------------------------------------------------------------
+
+## 5. Stage 1 --- End-to-End Verification
+
+### Verification date
+
+**2026-08-16**
+
+### Result
+
+## ✅ PASSED
+
+A real PDF upload was successfully processed through the complete
+Node.js → Redis → Python → ChromaDB → MongoDB → Redis → Node.js
+pipeline.
+
+### Verified evidence
+
+#### Node.js → Redis
+
+``` text
+Published PDF request to pdf_process_requests, subscribers: 1
+```
+
+This proves the Python worker was subscribed to the same Redis channel
+when the request was published.
+
+#### Python received the request
+
+``` text
+PDF process request: <documentId> - dummy.pdf
+```
+
+#### MongoDB lifecycle
+
+``` text
+PENDING
+   ↓
+PROCESSING
+   ↓
+COMPLETED
+```
+
+#### PDF download
+
+``` text
+HTTP/1.1 200 OK
+```
+
+The ImageKit remote PDF URL was successfully downloaded.
+
+#### PDF processing
+
+``` text
+Loaded 1 pages from PDF
+Created 1 chunks
+```
+
+#### Gemini embeddings
+
+``` text
+Generated 1 embeddings (dimension: 768)
+```
+
+#### ChromaDB
+
+``` text
+Stored 1 vectors (collection total: 1)
+```
+
+#### Python → Redis
+
+``` text
+PDF response published for <documentId>
+```
+
+#### Redis → Node.js
+
+``` text
+Document <documentId> status updated to: COMPLETED
+```
+
+### Final Stage 1 result
+
+``` text
+PDF Upload
+   ↓
+ImageKit                         ✅
+   ↓
+MongoDB PENDING                  ✅
+   ↓
+Redis Request                    ✅
+   ↓
+Python Worker                    ✅
+   ↓
+MongoDB PROCESSING               ✅
+   ↓
+ImageKit Download                ✅
+   ↓
+PDF Parsing                      ✅
+   ↓
+Chunking                         ✅
+   ↓
+Gemini Embedding (768D)          ✅
+   ↓
+ChromaDB Vector Storage          ✅
+   ↓
+MongoDB COMPLETED                ✅
+   ↓
+Redis Response                   ✅
+   ↓
+Node.js Subscriber               ✅
+```
+
+------------------------------------------------------------------------
+
+## 6. Redis Connection Resilience
+
+During integration testing, the Python Redis Pub/Sub connection
+experienced transient connection timeouts.
+
+The worker was updated to recover instead of permanently crashing:
+
+``` text
+Redis connection lost
+        ↓
+Reconnect with backoff
+        ↓
+Connected to Redis
+        ↓
+Publisher initialized
+        ↓
+Channels resubscribed
+        ↓
+Worker listening
+```
+
+This behavior was observed successfully during the Stage 1 test.
+
+------------------------------------------------------------------------
+
+## 7. Status Lifecycle
+
+The document processing status is standardized as:
+
+``` text
+PENDING
+   ↓
+PROCESSING
+   ↓
+COMPLETED
+```
+
+Failure path:
+
+``` text
+PENDING / PROCESSING
+        ↓
+      FAILED
+```
+
+The verified successful run ended with:
+
+``` text
+COMPLETED
+```
+
+------------------------------------------------------------------------
+
+## 8. RAG Chat Communication Contract
+
+The chat communication layer is defined but has **not yet been marked
+end-to-end verified**.
+
+### 8.1 Request --- `pdf_chat_requests`
+
+``` json
 {
   "type": "ask_question",
-  "requestId": "string (UUID v4 for correlation)",
-  "sessionId": "string (Session identifier)",
-  "question": "string (User query text)",
+  "requestId": "UUID",
+  "sessionId": "documentId",
+  "question": "string",
   "conversationHistory": [
     {
-      "role": "user" | "assistant",
+      "role": "user",
+      "content": "string"
+    },
+    {
+      "role": "assistant",
       "content": "string"
     }
   ]
 }
 ```
 
----
+### 8.2 Response --- `pdf_chat_responses`
 
-### 3.4 Chat/RAG Responses (`pdf_chat_responses`)
-
-Published by Python back to Node.js.
-
-#### Schema definition:
-```json
+``` json
 {
   "type": "ask_question_response",
-  "requestId": "string (UUID v4 from original request)",
-  "answer": "string | null",
+  "requestId": "UUID",
+  "answer": "string",
   "sources": [
     {
-      "text": "string (Chunk text content)",
+      "text": "string",
       "similarity": 0.0,
       "page_number": 0,
       "metadata": {}
@@ -169,115 +365,132 @@ Published by Python back to Node.js.
   "suggestedQuestions": [
     "string"
   ],
-  "error": "string | null",
-  "timestamp": "string (ISO 8601 Date)"
+  "error": null,
+  "timestamp": "ISO-8601 timestamp"
 }
 ```
 
----
+### Chat flow
 
-## 4. Identified Alignment Gaps (Critical Action Items)
+``` text
+User
+ ↓
+Node.js /api/chat/ask
+ ↓
+Generate requestId
+ ↓
+Redis: pdf_chat_requests
+ ↓
+Python AI
+ ↓
+Query embedding
+ ↓
+Chroma similarity search
+ ↓
+LangGraph
+ ├── Retrieve
+ ├── Generate
+ └── Suggest
+ ↓
+Redis: pdf_chat_responses
+ ↓
+Node.js
+ ↓
+HTTP response / frontend
+```
 
-A thorough review of the current implementation in [`backend`](file:///c:/Users/ghans/Devloper/RAG-Chatbot/backend) and [`python-ai`](file:///c:/Users/ghans/Devloper/RAG-Chatbot/python-ai) reveals the following discrepancies that will prevent the services from communicating correctly.
+------------------------------------------------------------------------
 
-### 4.1 Chat Channel Name Mismatch
-> [!IMPORTANT]
-> **Discrepancy:**
-> * In `backend/src/redis/channels.ts`, the channels are named:
->   * `pdf_chat_requests` (value: `"pdf_chat_requests"`)
->   * `pdf_chat_responses` (value: `"pdf_chat_responses"`)
-> * In `python-ai/app/redis/redis_worker.py`, the worker subscribes to:
->   * `"chat_requests"`
->   * And publishes to `"chat_responses"`.
->
-> **Solution:**
-> Update Python's subscription list and publishing statement to match the Node.js channel names:
-> * Subscribe: `"pdf_chat_requests"`
-> * Publish: `"pdf_chat_responses"`
+## 9. Remaining Work
 
-### 4.2 Payload Schema Envelope Mismatch (Missing `type` Field)
-> [!WARNING]
-> **Discrepancy:**
-> * `python-ai`'s worker routes messages based on `payload.get("type")` (e.g. checking if it equals `"process_pdf"` or `"ask_question"`).
-> * In `backend/src/modules/documents/document.service.ts`, the payload published for uploads is:
->   ```typescript
->   const payload = JSON.stringify({
->     documentId: document._id,
->     filePath: document.filePath,
->     fileName: document.fileName,
->     action: "PROCESS",
->   });
->   ```
->   Since the `type` field is missing, the message will fail routing checks inside `redis_worker.py` and print: `Unknown message type 'None' on channel 'pdf_process_requests'`.
->
-> **Solution:**
-> Update the payload published by the Node.js `uploadDocument`, `reprocessDocument`, and `deleteDocuments` handlers to explicitly include `"type": "process_pdf"`.
+The communication layer for **PDF ingestion is established and
+verified**.
 
-### 4.3 Ingestion Actions Handler (PROCESS, REPROCESS, DELETE)
-> [!NOTE]
-> **Discrepancy:**
-> * Node.js supports three document management actions: `"PROCESS"`, `"REPROCESS"`, and `"DELETE"`.
-> * Python's `redis_worker.py` currently assumes all messages are for loading/embedding (`handle_pdf_process_request`). It does not distinguish between actions and does not support collection deletion.
->
-> **Solution:**
-> Enhance Python's `route_message` and `handle_pdf_process_request` functions:
-> 1. If `action` is `"DELETE"`, call `ChromaVectorStore.delete_collection(document_id)` to wipe vector records.
-> 2. If `action` is `"PROCESS"` or `"REPROCESS"`, invoke the document parser and vector storer.
+The following work remains:
 
-### 4.4 Local Path Verification vs. ImageKit URLs
-> [!IMPORTANT]
-> **Discrepancy:**
-> * In `backend`, documents are uploaded to ImageKit, returning a remote HTTP/HTTPS url (e.g., `https://ik.imagekit.io/...`). This is saved to `filePath`.
-> * In `python-ai/app/ingestion/pdf_processor.py` (lines 55-56), the worker executes:
->   ```python
->   if not os.path.exists(file_path):
->       raise FileNotFoundError(f"PDF file not found: {file_path}")
->   ```
->   This will fail for remote URLs, aborting document parsing before it can load.
->
-> **Solution:**
-> Modify the PDF loading logic:
-> 1. Detect if `file_path` starts with `http://` or `https://`.
-> 2. If it is a URL, skip `os.path.exists` and `os.access` checks, and pass the URL directly to `PyPDFLoader` (which supports remote URLs natively), or download the file locally to a temp folder first.
+### Chat Backend
 
-### 4.5 Status Enum Alignment
-> [!WARNING]
-> **Discrepancy:**
-> * Node's MongoDB mongoose schema enforces uppercase values for `processingStatus`: `["PENDING", "PROCESSING", "COMPLETED", "FAILED"]`.
-> * Python's MongoDB client (`mongo_client.py` line 121) sets status directly to `"ready"`, and the Redis payload uses `"completed"`.
-> * Node's subscriber updates the database directly using whatever string Python sends in `payload.status` (which is lowercase `"completed"` or `"failed"`), leading to validation/format inconsistency.
->
-> **Solution:**
-> Standardize on uppercase statuses in both services:
-> * Use `"PENDING"` when upload initiates.
-> * Use `"PROCESSING"` when Python begins ingestion.
-> * Use `"COMPLETED"` (or `"READY"`) once vectors are indexed.
-> * Use `"FAILED"` if any step fails.
-> Make sure both Python's MongoDB client direct updates and Redis payloads use these exact capitalized values.
+-   [ ] Implement/verify `POST /api/chat/ask`
+-   [ ] Implement request correlation using `requestId`
+-   [ ] Implement pending-request timeout handling
+-   [ ] Verify Node subscription to `pdf_chat_responses`
 
-### 4.6 Reprocess Route Method
-> [!NOTE]
-> **Discrepancy:**
-> * In `backend/src/modules/documents/document.routes.ts` line 30, the route is configured as:
->   `router.get("/:id/reprocess", ...)`
-> * Reprocessing updates state (resets status to `PENDING`), which is a state change operation and should logically be a `POST` method.
->
-> **Solution:**
-> Change `router.get` to `router.post` for the reprocess endpoint.
+### Chat AI Flow
 
----
+-   [ ] Verify Python receives `pdf_chat_requests`
+-   [ ] Verify Chroma retrieval
+-   [ ] Verify LangGraph `retrieve → generate → suggest`
+-   [ ] Verify Python publishes `pdf_chat_responses`
+-   [ ] Verify Node matches `requestId`
+-   [ ] Verify complete chat response reaches the client
 
-## 5. Summary Action Checklist for Developer
+### Document Operations
 
-To establish complete, error-free communication, execute these updates in the respective codebases:
+-   [ ] Verify PDF reprocess flow
+-   [ ] Verify PDF delete → Chroma collection cleanup
+-   [ ] Verify failure-path behavior
+-   [ ] Remove temporary diagnostic logging such as stray `undefined`
+    output
 
-### Node.js Backend Tasks
-- [ ] **Align Router**: In [`document.routes.ts`](file:///c:/Users/ghans/Devloper/RAG-Chatbot/backend/src/modules/documents/document.routes.ts), change the reprocess route to `router.post("/:id/reprocess", ...)`.
-- [ ] **Standardize Schema Payload**: In [`document.service.ts`](file:///c:/Users/ghans/Devloper/RAG-Chatbot/backend/src/modules/documents/document.service.ts), add `"type": "process_pdf"` to all payloads published to the `PDF_PROCESS_REQUESTS` channel.
-- [ ] **Handle Incoming Chat Channel**: Implement a Chat Module that publishes to `pdf_chat_requests` and subscribes to `pdf_chat_responses` to return solutions to the user.
+### Final Integration
 
-### Python AI Service Tasks
-- [ ] **Align Channel Names**: In [`redis_worker.py`](file:///c:/Users/ghans/Devloper/RAG-Chatbot/python-ai/app/redis/redis_worker.py), change `"chat_requests"` and `"chat_responses"` to `"pdf_chat_requests"` and `"pdf_chat_responses"`.
-- [ ] **Add Action Router Support**: Update `route_message` to dispatch actions (`PROCESS`, `REPROCESS`, `DELETE`). Integrate collection deletion for `DELETE`.
-- [ ] **Support Remote URLs**: Bypassing `os.path.exists` validation in [`pdf_processor.py`](file:///c:/Users/ghans/Devloper/RAG-Chatbot/python-ai/app/ingestion/pdf_processor.py) for paths starting with `http://` or `https://`.
-- [ ] **Align Status String Case**: Standardize status updates to use uppercase `"COMPLETED"` and `"FAILED"` instead of `"ready"` and `"failed"`.
+-   [ ] Frontend ↔ Node.js integration
+-   [ ] Chat UI
+-   [ ] Conversation memory
+-   [ ] Suggested questions
+-   [ ] Source document/page display
+-   [ ] Streaming response if required
+-   [ ] Full integration testing
+
+------------------------------------------------------------------------
+
+## 10. Verification Checklist
+
+### Stage 1 --- PDF Ingestion
+
+-   [x] Node backend starts
+-   [x] Python AI service starts
+-   [x] Both connect to Redis
+-   [x] Node publishes to `pdf_process_requests`
+-   [x] Redis reports `subscribers: 1`
+-   [x] Python receives PDF request
+-   [x] ImageKit PDF download works
+-   [x] PDF parsing works
+-   [x] Chunking works
+-   [x] Gemini embedding generation works
+-   [x] ChromaDB storage works
+-   [x] MongoDB status reaches `COMPLETED`
+-   [x] Python publishes PDF response
+-   [x] Node receives PDF response
+-   [x] Redis reconnect/resubscription works
+
+### Stage 2 --- Chat
+
+-   [ ] Node chat request
+-   [ ] Python chat request
+-   [ ] Chroma retrieval
+-   [ ] LangGraph execution
+-   [ ] Python chat response
+-   [ ] Node response correlation
+-   [ ] End-to-end answer
+-   [ ] Sources
+-   [ ] Suggested questions
+-   [ ] Conversation memory
+
+------------------------------------------------------------------------
+
+## 11. Current Milestone
+
+> **Milestone: Node.js ↔ Python AI communication established.**
+
+> **Stage 1: PDF ingestion and vectorization --- VERIFIED ✅**
+
+> **Next milestone: Stage 2 --- Chat Q&A communication and RAG
+> end-to-end verification.**
+
+Do not mark the chat communication layer as complete until a real
+question has successfully traveled through:
+
+``` text
+Node → Redis → Python → Chroma/LangGraph → Redis → Node
+```
