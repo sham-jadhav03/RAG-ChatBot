@@ -1,6 +1,6 @@
 import logging
 from typing import List, Dict, Any, Tuple
-import chromadb
+import chromadb 
 from langchain_core.documents import Document
 
 from app.config import config
@@ -13,7 +13,6 @@ class ChromaVectorStore:
     def __init__(self, path: str = None):
         """
         Initialize Chroma vector database
-        
         Args:
             path: Path to persistent Chroma storage
         """
@@ -37,10 +36,8 @@ class ChromaVectorStore:
             ) ->chromadb.api.Collection:
         """
         Get existing collection or create new one
-        
         Args:
             collection_name: Name of collection (usually document ID)
-            
         Returns:
             Chroma collection object
         """
@@ -65,7 +62,6 @@ class ChromaVectorStore:
             ) -> Dict[str, Any]:
         """
         Store document chunks and embeddings in Chroma
-        
         Args:
             document_id: MongoDB document ID
             chunks: List of text chunks
@@ -127,12 +123,10 @@ class ChromaVectorStore:
     ) -> List[Dict[str, Any]]:
         """
         Search for similar chunks in document
-        
         Args:
             document_id: MongoDB document ID
             query_embedding: Query embedding vector
             top_k: Number of results to return
-            
         Returns:
             List of similar chunks with metadata
         """
@@ -186,10 +180,8 @@ class ChromaVectorStore:
     async def delete_collection(self, document_id: str) -> bool:
         """
         Delete collection (when document is deleted)
-        
         Args:
             document_id: Document ID
-            
         Returns:
             True if deleted successfully
         """
@@ -210,10 +202,8 @@ class ChromaVectorStore:
     async def get_collection_stats(self, document_id: str) -> Dict[str, Any]:
         """
         Get statistics for a collection
-        
         Args:
             document_id: Document ID
-            
         Returns:
             Collection statistics
         """

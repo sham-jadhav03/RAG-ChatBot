@@ -2,38 +2,65 @@ import asyncio
 import json
 import logging
 import redis.asyncio as redis
+from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutError as RedisTimeoutError
 from typing import Dict, Any
 
 from app.config import config
 
 logger = logging.getLogger(__name__)
 
+# Reconnect backoff configuration
+_INITIAL_BACKOFF_S = 1.0
+_MAX_BACKOFF_S = 60.0
+_BACKOFF_FACTOR = 2.0
+
+# Redis socket configuration for long-lived Pub/Sub connections
+_REDIS_SOCKET_TIMEOUT = 30.0        # read timeout (seconds)
+_REDIS_SOCKET_CONNECT_TIMEOUT = 10.0 # connect timeout (seconds)
+_REDIS_HEALTH_CHECK_INTERVAL = 15    # keepalive ping interval (seconds)
+
+
 class RedisWorker:
-    """Manages Redis Pub/Sub connection and message routing"""
+    """Manages Redis Pub/Sub connection and message routing with auto-reconnect"""
+
+    # Canonical channel names — must match Node.js channels.ts
+    SUBSCRIBE_CHANNELS = [
+        "pdf_process_requests",
+        "pdf_chat_requests",
+    ]
 
     def __init__(self):
         self.redis_client = None
         self.pubsub = None
         self.publisher = None
 
+    # ------------------------------------------------------------------
+    # Connection lifecycle
+    # ------------------------------------------------------------------
+
     async def connect(self):
-        """Establish Redis connection"""
+        """Establish Redis subscriber and publisher connections"""
         try:
             self.redis_client = await redis.from_url(
                 config.REDIS_URL,
                 encoding="utf-8",
                 decode_responses=True,
+                socket_timeout=_REDIS_SOCKET_TIMEOUT,
+                socket_connect_timeout=_REDIS_SOCKET_CONNECT_TIMEOUT,
+                health_check_interval=_REDIS_HEALTH_CHECK_INTERVAL,
             )
 
             # Test connection
             await self.redis_client.ping()
             logger.info(f"Connected to Redis: {config.REDIS_URL}")
 
-            # Separate client for publishing
+            # Separate client for publishing (Pub/Sub client cannot publish)
             self.publisher = await redis.from_url(
                 config.REDIS_URL,
                 encoding="utf-8",
                 decode_responses=True,
+                socket_timeout=_REDIS_SOCKET_TIMEOUT,
+                socket_connect_timeout=_REDIS_SOCKET_CONNECT_TIMEOUT,
             )
             logger.info("Redis publisher initialized")
 
@@ -45,35 +72,71 @@ class RedisWorker:
         """Subscribe to all required channels"""
         try:
             self.pubsub = self.redis_client.pubsub()
-
-            channels = [
-                "pdf_process_requests",
-                "chat_requests",
-            ]
-
-            await self.pubsub.subscribe(*channels)
-            logger.info(f"subscribed to channels: {channels}")
-
+            await self.pubsub.subscribe(*self.SUBSCRIBE_CHANNELS)
+            logger.info(f"Subscribed to channels: {self.SUBSCRIBE_CHANNELS}")
         except Exception as e:
             logger.error(f"Failed to subscribe to channels: {e}")
             raise
 
+    async def _close_silently(self):
+        """
+        Close all Redis connections silently.
+        Used before reconnect — errors are logged but not raised.
+        """
+        for name, obj in [("pubsub", self.pubsub), ("redis_client", self.redis_client), ("publisher", self.publisher)]:
+            if obj is None:
+                continue
+            try:
+                if name == "pubsub":
+                    await obj.unsubscribe()
+                await obj.close()
+            except Exception as e:
+                logger.debug(f"Ignored error closing {name}: {e}")
+        self.pubsub = None
+        self.redis_client = None
+        self.publisher = None
+
+    async def cleanup(self):
+        """Close Redis connections (used for graceful shutdown)"""
+        try:
+            if self.pubsub:
+                await self.pubsub.unsubscribe()
+                await self.pubsub.close()
+                logger.info("PubSub closed")
+
+            if self.redis_client:
+                await self.redis_client.close()
+                logger.info("Redis client closed")
+
+            if self.publisher:
+                await self.publisher.close()
+                logger.info("Redis publisher closed")
+
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+
+    # ------------------------------------------------------------------
+    # Publishing
+    # ------------------------------------------------------------------
+
     async def publish_response(self, channel: str, message: Dict[str, Any]):
         """
-            Publish a response message to a channel
-            Args:
-                channel: Redis channel name
-                message: Message dict to publish
+        Publish a response message to a channel
+        Args:
+            channel: Redis channel name
+            message: Message dict to publish
         """
-
         try:
             json_message = json.dumps(message)
             await self.publisher.publish(channel, json_message)
             logger.debug(f"Published to {channel}: {message.get('type', 'unknown')}")
-
         except Exception as e:
             logger.error(f"Failed to publish to {channel}: {e}")
             raise
+
+    # ------------------------------------------------------------------
+    # Message handlers
+    # ------------------------------------------------------------------
 
     async def handle_pdf_process_request(self, payload: Dict[str, Any]):
         """
@@ -273,12 +336,12 @@ class RedisWorker:
                     "timestamp": None  # Will be set in Phase 9
                 }
 
-                await self.publish_response("chat_responses", response)
+                await self.publish_response("pdf_chat_responses", response)
                 logger.info(f"Chat response published for {request_id[:8]}...")
 
             except ValueError as e:
                 logger.error(f"Validation error: {e}")
-                await self.publish_response("chat_responses", {
+                await self.publish_response("pdf_chat_responses", {
                     "type": "ask_question_response",
                     "requestId": request_id,
                     "answer": None,
@@ -291,7 +354,7 @@ class RedisWorker:
         except Exception as e:
             logger.error(f"Error handling chat request: {e}", exc_info=True)
             # Send error response
-            await self.publish_response("chat_responses", {
+            await self.publish_response("pdf_chat_responses", {
                 "type": "ask_question_response",
                 "requestId": request_id,
                 "answer": None,
@@ -313,82 +376,98 @@ class RedisWorker:
         if channel == "pdf_process_requests" and message_type == "process_pdf":
             await self.handle_pdf_process_request(payload)
             
-        elif channel == "chat_requests" and message_type == "ask_question":
+        elif channel == "pdf_chat_requests" and message_type == "ask_question":
             await self.handle_chat_request(payload)
             
         else:
             logger.warning(
                 f"Unknown message type '{message_type}' on channel '{channel}'"
             )
- 
+
+    # ------------------------------------------------------------------
+    # Main listener with reconnect
+    # ------------------------------------------------------------------
+
     async def listen_forever(self):
         """
-        Main listener loop - continuously processes incoming messages
-        Runs indefinitely until cancelled
+        Main listener loop with automatic reconnection.
+
+        On Redis connection loss the worker:
+        1. Closes all broken connections silently.
+        2. Waits with bounded exponential backoff (1 s → 60 s).
+        3. Re-creates Redis client, publisher, and Pub/Sub subscription.
+        4. Resumes listening.
+
+        The loop exits only on asyncio.CancelledError (graceful shutdown).
         """
-        await self.connect()
-        await self.subscribe_to_channels()
-        
-        logger.info("🎧 Redis worker listening for messages...")
-        
-        try:
-            async for message in self.pubsub.listen():
-                # Skip subscription confirmation messages
-                if message["type"] == "subscribe":
-                    logger.debug(f"Subscribed to {message['channel']}")
-                    continue
-                
-                # Skip unsubscribe messages
-                if message["type"] == "unsubscribe":
-                    continue
-                
-                # Process actual message
-                if message["type"] == "message":
-                    channel = message["channel"]
-                    data = message["data"]
-                    
-                    try:
-                        payload = json.loads(data)
-                        logger.debug(f"Message on {channel}: {payload.get('type', 'unknown')}")
-                        await self.route_message(channel, payload)
-                        
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Invalid JSON from {channel}: {e}")
-                        logger.error(f"Raw data: {data}")
-                        
-        except asyncio.CancelledError:
-            logger.info("Redis worker listener cancelled")
-            
-        except Exception as e:
-            logger.error(f"Redis listener error: {e}", exc_info=True)
-            raise
-            
-        finally:
-            await self.cleanup()
- 
-    async def cleanup(self):
-        """Close Redis connections"""
-        try:
-            if self.pubsub:
-                await self.pubsub.unsubscribe()
-                await self.pubsub.close()
-                logger.info("PubSub closed")
-                
-            if self.redis_client:
-                await self.redis_client.close()
-                logger.info("Redis client closed")
-                
-            if self.publisher:
-                await self.publisher.close()
-                logger.info("Redis publisher closed")
-                
-        except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
- 
- 
+        backoff = _INITIAL_BACKOFF_S
+
+        while True:
+            try:
+                # --- (Re)connect ---
+                await self.connect()
+                await self.subscribe_to_channels()
+                logger.info("🎧 Redis worker listening for messages...")
+                backoff = _INITIAL_BACKOFF_S  # reset after successful connect
+
+                # --- Listen ---
+                async for message in self.pubsub.listen():
+                    # Skip subscription confirmation messages
+                    if message["type"] == "subscribe":
+                        logger.debug(f"Subscribed to {message['channel']}")
+                        continue
+
+                    # Skip unsubscribe messages
+                    if message["type"] == "unsubscribe":
+                        continue
+
+                    # Process actual message
+                    if message["type"] == "message":
+                        channel = message["channel"]
+                        data = message["data"]
+
+                        try:
+                            payload = json.loads(data)
+                            logger.debug(f"Message on {channel}: {payload.get('type', 'unknown')}")
+                            await self.route_message(channel, payload)
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Invalid JSON from {channel}: {e}")
+                            logger.error(f"Raw data: {data}")
+                        except Exception as e:
+                            # Application-level error in message handler — log but
+                            # do NOT crash the listener loop.
+                            logger.error(
+                                f"Error processing message on {channel}: {e}",
+                                exc_info=True,
+                            )
+
+            except asyncio.CancelledError:
+                logger.info("Redis worker listener cancelled — shutting down")
+                await self.cleanup()
+                return
+
+            except (RedisConnectionError, RedisTimeoutError, ConnectionError, OSError) as e:
+                # --- Transient connection failure: reconnect ---
+                logger.warning(f"Redis connection lost: {e}")
+                await self._close_silently()
+                logger.info(f"Reconnecting in {backoff:.1f}s …")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * _BACKOFF_FACTOR, _MAX_BACKOFF_S)
+
+            except Exception as e:
+                # Unexpected error — still attempt reconnect rather than die,
+                # but log the full traceback so it can be investigated.
+                logger.error(f"Unexpected Redis listener error: {e}", exc_info=True)
+                await self._close_silently()
+                logger.info(f"Reconnecting in {backoff:.1f}s …")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * _BACKOFF_FACTOR, _MAX_BACKOFF_S)
+
+
 # Global worker instance
 _worker = None
- 
+
+
 async def listen_to_redis():
     """
     Entry point for Redis worker

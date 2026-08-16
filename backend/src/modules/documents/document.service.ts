@@ -49,7 +49,7 @@ class documentService {
 
     console.log(typeof (imagekit as any).upload);
 
-    
+
     // 2. Save Document Metadata in MongoDB
     const document = await documentModel.create({
       fileName: file.originalname,
@@ -68,7 +68,16 @@ class documentService {
       action: "PROCESS",
     });
 
-    await redisPublisher.publish(REDIS_CHANNELS.PDF_PROCESS_REQUESTS, payload);
+    const subscribers = await redisPublisher.publish(
+      REDIS_CHANNELS.PDF_PROCESS_REQUESTS,
+      payload
+    );
+
+    console.log(
+      `Published PDF request to ${REDIS_CHANNELS.PDF_PROCESS_REQUESTS}, subscribers: ${subscribers}`
+    );
+
+    // await redisPublisher.publish(REDIS_CHANNELS.PDF_PROCESS_REQUESTS, payload);
 
     return document;
   }

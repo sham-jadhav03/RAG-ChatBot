@@ -39,13 +39,10 @@ class EmbeddingGenerator:
     async def embed_documents(self, chunks: List[Document]) -> Tuple[List[List[float]], List[Document]]:
         """
         Generate embeddings for document chunks
-        
         Args:
             chunks: List of Document chunks
-            
         Returns:
             Tuple of (embeddings list, chunks list with metadata)
-            
         Raises:
             ValueError: If embedding fails
         """
@@ -64,7 +61,7 @@ class EmbeddingGenerator:
 
             # Generate embeddings
             # Note: GOOGLE GEMINI Embedding are blocking, we call them directly
-            embeddings = await self.embeddings.embed_documents(texts)
+            embeddings = await asyncio.to_thread(self.embeddings.embed_documents, texts)
 
             if not embeddings:
                 raise ValueError("No embedding generated")
