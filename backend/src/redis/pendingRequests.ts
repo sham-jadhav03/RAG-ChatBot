@@ -26,7 +26,7 @@ interface PendingRequestEntry {
   createdAt: number;
 }
 
-export class PendingRequestsRegistry {
+export class PendingRequests {
   private pending = new Map<string, PendingRequestEntry>();
 
   /**
