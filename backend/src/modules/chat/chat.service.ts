@@ -1,16 +1,19 @@
 import { v4 as uuidv4 } from "uuid";
+
 import documentModel from "../../models/document.models.js";
 import chatMessageModel, {
   IChatMessage,
   IChatSource,
 } from "../../models/chat.model.js";
-import pendingRequests from "../../redis/pendingRequests.js";
 import { redisPublisher } from "../../redis/publisher.js";
 import { REDIS_CHANNELS } from "../../redis/channels.js";
+import {
+  pendingRequests,
+  SourceDocument,
+} from "../../redis/pendingRequests.js";
 
 const CONVERSATION_HISTORY_LIMIT = 5;
-
-const CHAT_REQUEST_TIMEOUT_MS = 3000;
+const CHAT_REQUEST_TIMEOUT_MS = 30000;
 
 export interface AskQuestionInput {
   sessionId: string;
@@ -26,127 +29,150 @@ export interface GetHistoryInput {
 
 class chatService {
   /**
-   * Verify the document exists and has finished processing.
-   * Throws a tagged error (statusCode attached) for the controller layer
-   * to map directly to the correct HTTP response.
+   * Verify that the document exists and has completed processing.
    */
-  async verifyDocumentReady(documentId: string): Promise<void> {
+  private async verifyDocumentReady(documentId: string) {
     const document = await documentModel.findById(documentId);
 
     if (!document) {
-      const err = new Error("Document not found.");
-      (err as any).statusCode = 404;
-      throw err;
+      const error = new Error("Document not found.");
+      (error as any).statusCode = 404;
+      throw error;
     }
 
     if (document.processingStatus !== "COMPLETED") {
-      const err = new Error(
-        `Document is not ready for chat yet (status: ${document.processingStatus})`,
+      const error = new Error(
+        `Document is not ready for chat yet (status: ${document.processingStatus}).`,
       );
-      (err as any).statusCode = 409;
-      throw err;
+      (error as any).statusCode = 409;
+      throw error;
+    }
+
+    return document;
+  }
+
+  /**
+   * A session must remain associated with the same document.
+   */
+  private async enforceSessionDocumentBinding(
+    sessionId: string,
+    documentId: string,
+  ): Promise<void> {
+    const conflictingMessage = await chatMessageModel
+      .findOne({
+        sessionId,
+        documentId: { $ne: documentId },
+      })
+      .select("_id")
+      .lean();
+
+    if (conflictingMessage) {
+      const error = new Error(
+        "This session is already associated with a different document. " +
+          "Start a new session to chat with a different document.",
+      );
+      (error as any).statusCode = 409;
+      throw error;
     }
   }
 
   /**
-   * Build the AI conversation history server-side from MongoDB.
-   * conversationHistory is NEVER accepted from the client (see
-   * chat.validator.ts) — this is the single source of truth for it.
+   * Build conversation history server-side from MongoDB.
    *
-   * Pulls the last `limit` Q&A pairs for this session, oldest first,
-   * and expands each pair into two {role, content} entries matching
-   * the format Python's ChatState expects.
+   * Only the latest N Q&A pairs are used.
+   * MongoDB is the source of truth; client-supplied history is never used.
    */
-  async getConversationHistory(
+  private async getConversationHistory(
     sessionId: string,
+    documentId: string,
     limit: number,
-  ): Promise<{ role: string; content: string }[]> {
-    const recent = await chatMessageModel
-      .find({ sessionId })
-      .sort({ createAt: -1 })
+  ): Promise<{ role: "user" | "assistant"; content: string }[]> {
+    const recentMessages = await chatMessageModel
+      .find({
+        sessionId,
+        documentId,
+      })
+      .sort({ createdAt: -1 })
       .limit(limit)
       .select("question answer")
       .lean();
 
-    const chronological = recent.reverse();
+    const chronologicalMessages = recentMessages.reverse();
 
-    const history: { role: string; content: string }[] = [];
+    const history: {
+      role: "user" | "assistant";
+      content: string;
+    }[] = [];
 
-    for (const msg of chronological) {
-      history.push({ role: "user", content: msg.question });
-      history.push({ role: "assistant", content: msg.answer });
+    for (const message of chronologicalMessages) {
+      history.push({
+        role: "user",
+        content: message.question,
+      });
+
+      history.push({
+        role: "assistant",
+        content: message.answer,
+      });
     }
 
     return history;
   }
 
   /**
-   * Map Python's raw source payload (which may carry either the fully
-   * formed {documentName, pageNumber, excerpt, similarity} shape, or the
-   * looser {text, metadata} chunk shape) into chat.model.ts's stricter,
-   * required sub-schema. Missing fields fall back to safe defaults so a
-   * malformed/partial source never blocks persisting an otherwise
-   * successful answer.
+   * Normalize Python source payload into the MongoDB ChatSource schema.
+   *
+   * Python's current contract provides:
+   * documentName
+   * pageNumber
+   * excerpt
+   * similarity
+   *
+   * Node uses the actual document filename as the authoritative source name.
    */
-  private normalizeSources(sources: SourceDocument[] = []): IChatSource[] {
-    return sources.map((source) => {
-      const documentName =
-        source.documentName ??
-        source.metadata?.source_filename ??
-        "Unknown Source";
-
-      const pageNumber =
-        typeof source.pageNumber === "number"
-          ? sources.pageNumber
-          : typeof source.metadata?.page === "number"
-            ? source.metadata.page
-            : null;
-
-      const excerpt =
-        source.excerpt && source.excerpt.length > 0
-          ? source.excerpt
-          : source.text
-            ? source.text.slice(0, 200)
-            : "";
-
-      const similarity =
-        typeof source.similarity === "number" ? source.similarity : 0;
-
-      return { documentName, pageNumber, excerpt, similarity };
-    });
+  private normalizeSources(
+    sources: SourceDocument[] = [],
+    realDocumentName: string,
+  ): IChatSource[] {
+    return sources.map((source) => ({
+      documentName: realDocumentName,
+      pageNumber:
+        typeof source.pageNumber === "number" ? source.pageNumber : null,
+      excerpt: typeof source.excerpt === "string" ? source.excerpt : "",
+      similarity: typeof source.similarity === "number" ? source.similarity : 0,
+    }));
   }
 
   /**
-   * Main orchestration: validate document readiness, build history,
-   * correlate a Redis round-trip to Python via requestId, and persist
-   * only successful exchanges.
+   * Ask a question against a processed document.
    *
-   * Node.js NEVER calls Python directly — communication happens only
-   * through Redis Pub/Sub (pdf_chat_requests / pdf_chat_responses).
+   * Node communicates with Python exclusively through Redis Pub/Sub.
    */
-  async askQuestion(input: AskQuestionInput): Promise<IChatMessage> {
+  public async askQuestion(input: AskQuestionInput): Promise<IChatMessage> {
     const { sessionId, documentId, question } = input;
 
-    // 1. Verify document exists and finished processing
-    await this.verifyDocumentReady(documentId);
+    // 1. Verify document exists and is ready.
+    const document = await this.verifyDocumentReady(documentId);
 
-    // 2. Build conversion history  server-side (never client-suplied)
+    // 2. Prevent one session from being reused across documents.
+    await this.enforceSessionDocumentBinding(sessionId, documentId);
+
+    // 3. Build conversation history from MongoDB.
     const conversationHistory = await this.getConversationHistory(
       sessionId,
+      documentId,
       CONVERSATION_HISTORY_LIMIT,
     );
 
-    // 3. Generate correlation ID for this round-trip
+    // 4. Generate correlation ID.
     const requestId = uuidv4();
 
-    // 4. Register BEFORE publishing — guarantees the pending entry exists
-    //    before Python could possibly respond, avoiding a race condition.
+    // 5. Register the pending request BEFORE publishing to Redis.
     const responsePromise = pendingRequests.register(
       requestId,
       CHAT_REQUEST_TIMEOUT_MS,
     );
 
-    // 5. Publish to Redis
     const requestPayload = {
       type: "ask_question",
       requestId,
@@ -155,69 +181,97 @@ class chatService {
       question,
       conversationHistory,
     };
+
+    // 6. Publish request to Python through Redis.
     try {
       await redisPublisher.publish(
         REDIS_CHANNELS.PDF_CHAT_REQUESTS,
         JSON.stringify(requestPayload),
       );
-    } catch (publishErr: any) {
-      pendingRequests.reject(requestId, publishErr);
-      const err = new Error("AI service is temporarily unavailable.");
-      (err as any).statusCode = 503;
-      throw err;
+    } catch (publishError) {
+      pendingRequests.reject(requestId, publishError as Error);
+
+      const error = new Error("AI service is temporarily unavailable.");
+      (error as any).statusCode = 503;
+
+      throw error;
     }
 
-    // 6. Wait for the correlated response (resolved/rejected by
-    //    subscriber.ts when the matching requestId arrives on
-    //    pdf_chat_responses, or rejected internally on timeout).
+    // 7. Wait for the correlated Python response.
     let response;
+
     try {
       response = await responsePromise;
-    } catch (err: any) {
-      if (!err.statusCode) {
-        err.statusCode = 502;
+    } catch (error: any) {
+      // Timeout from pendingRequests → 504.
+      // Python returned an error → 502.
+      if (!error.statusCode) {
+        error.statusCode = 502;
       }
-      throw err;
+
+      throw error;
     }
 
-    // 7. Normalize sources into the shape chat.model.ts requires
+    // 8. A successful response must contain an actual answer.
+    if (
+      typeof response.answer !== "string" ||
+      response.answer.trim().length === 0
+    ) {
+      const error = new Error(
+        "AI service returned an invalid or empty answer.",
+      );
+      (error as any).statusCode = 502;
+      throw error;
+    }
 
-    const normalizeSources = this.normalizeSources(response.sources);
+    // 9. Normalize sources into MongoDB's strict schema.
+    const normalizedSources = this.normalizeSources(
+      response.sources,
+      document.fileName,
+    );
 
-    // 8. Persist ONLY successful exchanges. Failures (timeout, AI error,
-    //    publish failure) already threw above and never reach this line.
-    const saved = await chatMessageModel.create({
+    // 10. Persist only successful Q&A exchanges.
+    const savedMessage = await chatMessageModel.create({
       sessionId,
       documentId,
       question,
       answer: response.answer,
-      sources: normalizeSources,
-      suggestedQuestions: response.suggestedQuestions || [],
+      sources: normalizedSources,
+      suggestedQuestions: Array.isArray(response.suggestedQuestions)
+        ? response.suggestedQuestions
+        : [],
       requestId,
     });
 
-    return saved;
+    return savedMessage;
   }
 
   /**
-   * Retrieve paginated chat history for a session, oldest first.
+   * Retrieve paginated chat history for a session.
+   *
+   * History is returned oldest → newest for natural conversation rendering.
    */
-  async getHistory(input: GetHistoryInput) {
+  public async getHistory(input: GetHistoryInput) {
     const page = input.page || 1;
     const limit = input.limit || 10;
     const skip = (page - 1) * limit;
 
-    const [message, total] = await Promise.all([
+    const filter = {
+      sessionId: input.sessionId,
+    };
+
+    const [messages, total] = await Promise.all([
       chatMessageModel
-        .find({ sessionId: input.sessionId })
-        .sort({ createAt: 1 })
+        .find(filter)
+        .sort({ createdAt: 1 })
         .skip(skip)
         .limit(limit),
-      chatMessageModel.countDocuments({ sessionId: input.sessionId }),
+
+      chatMessageModel.countDocuments(filter),
     ]);
 
     return {
-      message,
+      messages,
       pagination: {
         total,
         page,
@@ -228,4 +282,4 @@ class chatService {
   }
 }
 
-export default new chatService()
+export default new chatService();

@@ -15,8 +15,10 @@ app.get("/", (req: Request, res: Response) => {
 
 import authRoutes from "./modules/auth/auth.routes";
 import documentRoutes from "./modules/documents/document.routes";
+import chatRoutes from "./modules/chat/chat.routes";
 
 app.use("/api/auth", authRoutes);
 app.use("/api/documents", documentRoutes);
+app.use("/api/chat", chatRoutes);
 
 export default app;

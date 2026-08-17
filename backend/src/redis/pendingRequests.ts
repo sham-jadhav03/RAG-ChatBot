@@ -129,4 +129,4 @@ export class PendingRequests {
 }
 
 // Export singleton instance
-export const pendingRequests = new PendingRequestsRegistry();
+export const pendingRequests = new PendingRequests();
