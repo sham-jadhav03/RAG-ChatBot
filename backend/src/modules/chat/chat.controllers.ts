@@ -49,7 +49,13 @@ export async function getHistoryController(
   try {
     const { sessionId } = req.params;
 
-    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const page = req.query.page 
+      ? parseInt(req.query.page as string, 10) 
+      : 1;
+
+    const limit = req.query.limit
+      ? parseInt(req.query.limit as string, 10)
+      : 10;
 
     const result = await chatService.getHistory({
       sessionId,
