@@ -36,7 +36,6 @@ def get_llm():
 async def retrieve_node(state: ChatState) -> ChatState:
     """
     Node 1: Retrieve relevant context from Chroma.
-
     Takes question → generates embedding → searches Chroma → returns top chunks.
     """
     try:
@@ -152,8 +151,19 @@ async def generate_node(state: ChatState) -> ChatState:
                 formatted_messages.append(AIMessage(content=content))
 
         response = await llm.ainvoke(formatted_messages)
-        state.answer = response.content  # fixed typo: contennt → content
 
+        # Gemini/LangChain may return either a plain string or
+        # structured content blocks. ChatState.answer must always be a string.
+        if isinstance(response.content, str): 
+            state.answer = response.content  
+        elif isinstance(response.content, list):
+            state.answer = "".join(
+                block.get("text", "")
+                for block in response.content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        else:
+            state.answer = str(response.content)    
         logger.debug(f"Generated answer: {state.answer[:50]}...")
         return state
 
@@ -171,7 +181,6 @@ async def generate_node(state: ChatState) -> ChatState:
 async def suggest_node(state: ChatState) -> ChatState:
     """
     Node 3: Generate suggested follow-up questions.
-
     Takes answer + context → calls LLM → returns 3-5 suggestions.
     """
     try:
@@ -209,3 +218,4 @@ async def suggest_node(state: ChatState) -> ChatState:
         logger.error(f"Suggest node error: {e}", exc_info=True)
         state.suggested_questions = []  # Graceful fallback
         return state
+

@@ -41,7 +41,7 @@ export async function askQuestionController(
  * GET /api/chat/:sessionId/history
  * Returns paginated conversation history for a session.
  */
-export async function getHistroyController(
+export async function getHistoryController(
   req: Request,
   res: Response,
   next: NextFunction,

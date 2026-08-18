@@ -13,7 +13,7 @@ router.post(
 router.get(
   "/:sessionId/history",
   chatValidator.validateHistoryQuery,
-  chatController.getHistroyController,
+  chatController.getHistoryController,
 );
 
 export default router;

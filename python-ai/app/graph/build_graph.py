@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 def build_rag_graph():
     """
     Build the RAG workflow graph
-    
     Flow: input → retrieve → generate → suggest → output
     """
     try:
