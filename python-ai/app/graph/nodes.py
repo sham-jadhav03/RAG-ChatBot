@@ -201,8 +201,19 @@ async def suggest_node(state: ChatState) -> ChatState:
 
         response = await llm.ainvoke([HumanMessage(content=suggestion_prompt)])
 
+        if isinstance(response.content, str):
+            suggestion_content = response.content
+        elif isinstance(response.content, list):
+            suggestion_content = "".join(
+                block.get("text", "")
+                for block in response.content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        else:
+            suggestion_content = str(response.content)        
+
         try:
-            suggestions = json.loads(response.content)
+            suggestions = json.loads(suggestion_content)
             if isinstance(suggestions, list):
                 state.suggested_questions = suggestions[:5]  # Max 5
             else:
@@ -218,4 +229,3 @@ async def suggest_node(state: ChatState) -> ChatState:
         logger.error(f"Suggest node error: {e}", exc_info=True)
         state.suggested_questions = []  # Graceful fallback
         return state
-

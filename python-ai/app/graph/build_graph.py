@@ -1,7 +1,7 @@
 import logging
 from langgraph.graph import StateGraph
 from .state import ChatState
-from .Node import retrieve_node, generate_node, suggest_node
+from .nodes import retrieve_node, generate_node, suggest_node
 
 logger = logging.getLogger(__name__)
 
@@ -84,15 +84,15 @@ async def invoke_rag_graph(question: str, session_id: str, history: list, docume
         final_state = await graph.ainvoke(state)
 
         logger.info(f"Rag graph complete")
-        return final_state
+        return ChatState.model_validate(final_state)
 
     except Exception as e:
         logger.error(f"Error invoking graph: {e}", exc_info=True)
         # Return error state
         return ChatState(
-            question=question,
-            session_id=session_id,
-            document_id=document_id,
-            answer="An error occurred processing your question",
-            error=str(e),
+             question=question,
+             session_id=session_id,
+             document_id=document_id,
+             answer="An error occurred processing your question",
+             error=str(e),
         )
