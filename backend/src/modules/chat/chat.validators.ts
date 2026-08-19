@@ -9,6 +9,7 @@ export class ChatValidator {
     next: NextFunction,
   ): void {
     const { sessionId, documentId, question } = req.body;
+    
     const errors: string[] = [];
 
     if (
