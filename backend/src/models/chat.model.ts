@@ -17,10 +17,10 @@ export interface IChatMessage extends MongooseDocument {
   documentId: Types.ObjectId;
   question: string;
   answer: string;
-  sources: IChatMessage[];
+  sources: IChatSource[];
   suggestedQuestions: string[];
   requestId?: string;
-  createAt: Date;
+  createdAt: Date;
   updatedAt: Date;
 }
 
@@ -60,6 +60,10 @@ const chatMessageSchema = new Schema<IChatMessage>(
       required: [true, "Document Id is required."],
     },
     question: {
+      type: String,
+      required: [true, "Answer is required."],
+    },
+    answer: {
       type: String,
       required: [true, "Answer is required."],
     },

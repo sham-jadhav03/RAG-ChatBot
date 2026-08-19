@@ -310,6 +310,8 @@ class RedisWorker:
                 f"doc: {document_id} - {question[:50] if question else ''}..."
             )
             logger.debug(f"   Session: {session_id}")
+            logger.info(f"Conversation history: {len(conversation_history)} entries")
+            logger.info(f"Conversation history: {conversation_history}")
 
             try:
                 # Import LangGraph
