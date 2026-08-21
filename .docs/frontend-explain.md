@@ -1,6 +1,15 @@
 # RAG Chatbot Frontend — Architecture Explanation
 
-This document explains how the planned `frontend/` folder structure works with the existing backend endpoints and the Phase 11 frontend architecture.
+> **Revision note:** This version corrects Section 16 (Admin Dashboard). The
+> previous draft left the door open to "extending the backend contract" for
+> dashboard stats. That endpoint does not exist and has not been scoped or
+> built. This revision removes that ambiguity: the dashboard is now scoped
+> strictly to what the four real endpoints can actually produce. Nothing is
+> invented on the frontend to compensate for a missing backend feature.
+
+This document explains how the planned `frontend/` folder structure works
+with the **existing, already-implemented** backend endpoints and the Phase 11
+frontend architecture.
 
 ## 1. High-Level Architecture
 
@@ -22,7 +31,8 @@ Express Backend
 
 The frontend does not communicate directly with the Python AI service.
 
-The frontend communicates with the Express backend through the backend API. The backend communicates with Python through Redis Pub/Sub.
+The frontend communicates with the Express backend through the backend API.
+The backend communicates with Python through Redis Pub/Sub.
 
 ---
 
@@ -80,7 +90,8 @@ Next.js App Router uses the `app/` directory to define routes.
 | `app/admin/page.tsx` | `/admin` |
 | `app/admin/documents/page.tsx` | `/admin/documents` |
 
-The `app/` directory should mainly compose pages and layouts rather than contain large amounts of business logic.
+The `app/` directory should mainly compose pages and layouts rather than
+contain large amounts of business logic.
 
 ---
 
@@ -106,7 +117,8 @@ Root Layout
     +-- Toaster
 ```
 
-TanStack Query needs its provider above components that use React Query hooks.
+TanStack Query needs its provider above components that use React Query
+hooks.
 
 ---
 
@@ -186,7 +198,13 @@ Express Backend
 Frontend
 ```
 
-The frontend is responsible for displaying the request state and response. It does not execute PDF processing or RAG logic.
+The frontend is responsible for displaying the request state and response.
+It does not execute PDF processing or RAG logic.
+
+There is no server-side streaming in the current backend contract. The
+frontend shows a real typing/loading indicator while the request is in
+flight, then renders the complete answer once the single response arrives.
+No fake chunked reveal is used.
 
 ---
 
@@ -225,9 +243,12 @@ The UI should not contain the complete API communication logic.
 
 # 8. `lib/session.ts`
 
-The backend uses `sessionId` for conversation history.
+The backend uses `sessionId` for conversation history, and enforces a
+one-`sessionId`-to-one-`documentId` binding for the life of that session
+(a mismatched reuse returns `409`).
 
-The frontend session helper is responsible for minting, reading, and resetting a session for a document.
+The frontend session helper is responsible for minting, reading, and
+resetting a session **whenever the active document changes**.
 
 Conceptually:
 
@@ -241,9 +262,9 @@ session.ts
 sessionId
 ```
 
-This allows a conversation to remain associated with the selected document.
-
-The backend also enforces session-to-document binding.
+This allows a conversation to remain associated with the selected document,
+and guarantees the frontend never triggers the backend's `409` session/doc
+conflict by switching documents mid-session.
 
 ---
 
@@ -284,6 +305,11 @@ Frontend messages[]
 
 This allows the current conversation to be restored from the backend.
 
+Note: this endpoint requires an already-known `sessionId`. There is no
+endpoint that lists all sessions, so this cannot be used to build any kind
+of "all conversations" or "total sessions" view — only to restore one
+specific, already-active session.
+
 ---
 
 # 10. `components/chat/`
@@ -310,7 +336,8 @@ Displays user and AI messages.
 
 ### `typing-indicator.tsx`
 
-Displays loading/typing state while waiting for the answer.
+Displays loading/typing state while waiting for the answer. This reflects a
+real pending request, not a simulated stream.
 
 ### `source-card.tsx`
 
@@ -322,7 +349,9 @@ Displays generated follow-up questions.
 
 ### `document-picker.tsx`
 
-Allows the user to select the document used by the chat.
+Allows the user to select the document used by the chat. Selecting a
+different document triggers `session.ts` to mint a new `sessionId` and
+clears the current thread.
 
 ---
 
@@ -349,9 +378,10 @@ Expected responsibilities:
 
 - Base API URL
 - HTTP requests
-- Bearer token attachment
+- Bearer token attachment (read from `localStorage`)
 - Response parsing
-- Typed API errors
+- Typed API errors, including the specific status codes the backend
+  actually returns: `404`, `409`, `502`, `503`, `504`
 
 Admin requests need the JWT:
 
@@ -365,7 +395,8 @@ The public chat does not require admin authentication.
 
 # 12. `lib/types.ts`
 
-This file contains frontend TypeScript types matching the backend API contract.
+This file contains frontend TypeScript types matching the **actual** backend
+API contract — not an idealized or hoped-for one.
 
 Examples of expected categories:
 
@@ -376,12 +407,12 @@ ChatMessage
 ChatResponse
 Source
 SuggestedQuestion
-ApiError
+ApiError   // discriminated union over 404 | 409 | 502 | 503 | 504
 ```
 
-The goal is to avoid spreading `any` throughout the frontend.
-
-The frontend should use the backend contract rather than inventing different response structures.
+The goal is to avoid spreading `any` throughout the frontend, and to avoid
+the frontend silently assuming a response shape (or an endpoint) that the
+backend doesn't actually provide.
 
 ---
 
@@ -423,7 +454,7 @@ MongoDB
 JWT response
     |
     v
-Frontend token storage
+Frontend token storage (localStorage)
 ```
 
 The backend currently exposes:
@@ -444,7 +475,7 @@ Expected responsibilities:
 ```text
 login()
 logout()
-getToken()
+getToken()      // reads from localStorage
 isAuthenticated
 ```
 
@@ -478,14 +509,15 @@ User visits /admin/documents
 admin/layout.tsx
           |
           v
-Authentication check
+Authentication check (client-side, reads localStorage token)
        /          valid   invalid
       |         |
       v         v
 documents   /admin/login
 ```
 
-The decided structure uses a client-side auth guard.
+The decided structure uses a client-side auth guard, consistent with the
+localStorage-JWT decision (no Next.js middleware or cookie proxy involved).
 
 ---
 
@@ -497,22 +529,53 @@ File:
 app/admin/page.tsx
 ```
 
-The dashboard UI includes:
+The assignment spec asks for four dashboard numbers:
+
+- Total Uploaded PDFs
+- Total Chat Sessions
+- Total Questions Asked
+- Recent Uploaded Documents
+
+**No dashboard-statistics endpoint exists in the current backend.** The only
+relevant endpoints that exist are:
+
+```text
+GET /api/documents
+GET /api/chat/:sessionId/history   (requires a known sessionId — cannot enumerate sessions)
+```
+
+This means, honestly, with the backend as it stands today:
+
+| Metric | Derivable from existing endpoints? | Source |
+|---|---|---|
+| Total Uploaded PDFs | ✅ Yes | `GET /api/documents` → count / `pagination.total` |
+| Recent Uploaded Documents | ✅ Yes | `GET /api/documents` → already sorted `createdAt: -1` |
+| Total Chat Sessions | ❌ No | No endpoint lists distinct sessions |
+| Total Questions Asked | ❌ No | No endpoint lists/counts all chat messages across sessions |
+
+**Decision: the frontend will not invent a fake number, a fake endpoint, or
+silently omit the metric without saying so.** `dashboard-stats.tsx` renders
+the two real metrics normally, and renders the two unavailable metrics as an
+explicit "Not available" / disabled state rather than a fabricated `0` or a
+guessed value.
+
+If the two missing metrics are required for full marks, that is a **backend
+task** — a small new endpoint (e.g. `GET /api/admin/dashboard/stats` doing a
+Mongo aggregation: `Document.countDocuments()`, distinct `sessionId` count
+and total document count from `ChatMessage`) — to be scoped and built
+separately, before the frontend dashboard is finalized. It is not solved by
+frontend workarounds.
 
 ```text
 Dashboard
     |
     +-- DashboardStats
+            |
+            +-- Total PDFs            (real)
+            +-- Recent Documents      (real)
+            +-- Total Chat Sessions   (unavailable — explicit empty state)
+            +-- Total Questions Asked (unavailable — explicit empty state)
 ```
-
-The assignment requires dashboard information such as:
-
-- Total uploaded PDFs
-- Total chat sessions
-- Total questions
-- Recent uploaded documents
-
-Important: the currently documented backend implementation does not list a dedicated dashboard statistics endpoint. The frontend should not invent one. If required, the backend contract must be extended during integration.
 
 ---
 
@@ -580,7 +643,8 @@ Express Backend
 
 The frontend only uploads the PDF to the backend.
 
-The frontend must not process PDFs, generate embeddings, or write directly to ChromaDB.
+The frontend must not process PDFs, generate embeddings, or write directly
+to ChromaDB.
 
 ---
 
@@ -619,7 +683,8 @@ documents[]
 DocumentTable
 ```
 
-TanStack Query is appropriate for caching and refetching document data.
+TanStack Query is appropriate for caching and refetching document data,
+including auto-refetch while any row is `PENDING`/`PROCESSING`.
 
 ---
 
@@ -656,17 +721,23 @@ Express
               Delete vectors
 ```
 
-After successful deletion, the frontend should invalidate/refetch the documents query.
+After successful deletion, the frontend should invalidate/refetch the
+documents query.
 
 ---
 
 # 21. Reprocess Document
 
-Endpoint:
+Actual endpoint (as implemented — note the verb):
 
 ```text
-POST /api/documents/:id/reprocess
+GET /api/documents/:id/reprocess
 ```
+
+> This is a `GET`, not a `POST`, in the current backend implementation. It
+> is not RESTful, but the frontend must call it as a `GET` to match what
+> actually exists — not as a `POST`, and not "fixed" silently on the
+> frontend in a way that would break against the real API.
 
 Flow:
 
@@ -677,7 +748,7 @@ DocumentTable
 use-documents.ts
       |
       v
-POST /api/documents/:id/reprocess
+GET /api/documents/:id/reprocess
       |
       v
 Express
@@ -732,9 +803,9 @@ DocumentTable
 useDocuments()
       |
       +-- query: GET /api/documents
-      +-- mutation: POST upload
-      +-- mutation: DELETE
-      +-- mutation: POST reprocess
+      +-- mutation: POST /api/documents/upload
+      +-- mutation: DELETE /api/documents/:id
+      +-- mutation: GET /api/documents/:id/reprocess
       |
       v
 api-client.ts
@@ -758,7 +829,9 @@ components/admin/
 
 The components should focus on rendering and user interaction.
 
-They should not contain duplicated API request code.
+They should not contain duplicated API request code, and — per Section
+16 — `dashboard-stats.tsx` must not silently fabricate the two metrics
+that have no backing endpoint.
 
 Preferred:
 
@@ -810,21 +883,25 @@ Formatted UI
 
 API errors can be converted into friendly messages.
 
-The planned component specifically maps common backend/gateway errors such as:
+The planned component specifically maps the **actual** backend/gateway
+error codes:
 
 ```text
-404
-409
-502
-503
-504
+404   document not found
+409   document not ready (COMPLETED expected) OR session/document conflict
+502   AI error or empty/null answer
+503   Redis publish failed
+504   30s request timeout
 ```
 
-to user-friendly copy.
+to user-friendly copy — not a generic catch-all error string.
 
 ---
 
 # 25. Complete Endpoint Map
+
+This map lists **only endpoints that actually exist today.** No endpoint is
+listed here on the assumption it will be added later.
 
 ## Authentication
 
@@ -841,6 +918,11 @@ api-client.ts
 POST /api/auth/login
 ```
 
+```text
+POST /api/auth/register
+POST /api/auth/login
+```
+
 ---
 
 ## Documents
@@ -851,13 +933,10 @@ POST /api/auth/login
        v
 use-documents.ts
        |
-       +----------------------------+
-       |             |              |
-       v             v              v
-GET /api/documents  POST upload   DELETE /:id
-                                   |
-                                   v
-                            POST /:id/reprocess
+       +----------------------------+------------------------------+
+       |             |              |                              |
+       v             v              v                              v
+GET /api/documents  POST upload   DELETE /:id           GET /:id/reprocess
 ```
 
 Actual endpoints:
@@ -866,7 +945,7 @@ Actual endpoints:
 POST   /api/documents/upload
 GET    /api/documents
 DELETE /api/documents/:id
-POST   /api/documents/:id/reprocess
+GET    /api/documents/:id/reprocess
 ```
 
 ---
@@ -887,6 +966,20 @@ use-chat.ts
 v                               v
 POST /api/chat/ask       GET /api/chat/:sessionId/history
 ```
+
+---
+
+## Not implemented (do not build frontend code against these)
+
+```text
+GET /api/admin/dashboard/stats     — does not exist
+GET /api/chat/sessions             — does not exist, cannot enumerate sessions
+GET /api/chat/questions/count      — does not exist
+```
+
+If any of these are needed for the assignment's dashboard requirement, they
+must be designed and built on the backend first, as their own scoped
+addition — not assumed into the frontend plan.
 
 ---
 
@@ -967,8 +1060,11 @@ Component re-render
 User sees result
 ```
 
-The key architectural rule is:
+The key architectural rules are:
 
 > **Frontend → Express → Redis → Python AI. Never Frontend → Python AI directly.**
 
-This follows the existing project architecture and the assignment requirement that Node.js and Python communicate through Redis Pub/Sub.
+> **Frontend code is only ever written against endpoints that actually
+> exist in the backend today.** Any gap between the assignment spec and the
+> real backend (currently: dashboard stats) is called out explicitly and
+> resolved as a backend task, not papered over on the frontend.
