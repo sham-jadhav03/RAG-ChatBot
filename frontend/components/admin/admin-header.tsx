@@ -27,6 +27,7 @@ export function AdminHeader() {
             type="button"
             onClick={() => setMobileNavOpen(true)}
             aria-label="Open navigation"
+            suppressHydrationWarning
             className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
           >
             <Menu className="size-5" />
@@ -54,6 +55,7 @@ export function AdminHeader() {
           <button
             type="button"
             onClick={handleLogout}
+            suppressHydrationWarning
             className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
           >
             <LogOut className="size-4" />

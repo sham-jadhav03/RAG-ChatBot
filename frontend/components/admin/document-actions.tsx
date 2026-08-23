@@ -1,10 +1,11 @@
 "use client";
 
-import { Loader2, MoreHorizontal, RefreshCw, Trash2 } from "lucide-react";
+import { Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { documentsApi } from "@/lib/api-client";
 import type { Document } from "@/lib/types";
+import { DeleteDocumentDialog } from "@/components/admin/delete-document-dialog"
 
 interface DocumentActionsProps {
   document: Document;
@@ -16,6 +17,7 @@ export function DocumentActions({ document }: DocumentActionsProps) {
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState("");
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
   async function handleReprocess() {
     if (isReprocessing || isDeleting) {
@@ -47,14 +49,6 @@ export function DocumentActions({ document }: DocumentActionsProps) {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Delete "${document.fileName}"? This action cannot be undone.`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
     setIsDeleting(true);
     setError("");
 
@@ -64,6 +58,8 @@ export function DocumentActions({ document }: DocumentActionsProps) {
       await queryClient.invalidateQueries({
         queryKey: ["documents"],
       });
+
+      setShowDeleteDialog(false);
     } catch (actionError) {
       setError(
         actionError instanceof Error
@@ -97,7 +93,7 @@ export function DocumentActions({ document }: DocumentActionsProps) {
 
       <button
         type="button"
-        onClick={handleDelete}
+        onClick={() => setShowDeleteDialog(true)}
         disabled={isBusy}
         title="Delete document"
         className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
@@ -117,6 +113,17 @@ export function DocumentActions({ document }: DocumentActionsProps) {
         >
           {error}
         </span>
+      )}
+
+      {showDeleteDialog && (
+        <DeleteDocumentDialog
+          fileName={document.fileName}
+          isDeleting={isDeleting}
+          onCancel={() => setShowDeleteDialog(false)}
+          onConfirm={async () => {
+            await handleDelete();
+          }}
+        />
       )}
     </div>
   );

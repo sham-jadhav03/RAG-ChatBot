@@ -9,9 +9,9 @@ export default function AdminLoginPage() {
     const router = useRouter();
     const { login } = useAuth();
 
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('')
-    const [error, setError] = useState('');
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [error, setError] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -65,6 +65,7 @@ export default function AdminLoginPage() {
                             value={email}
                             onChange={(event) => setEmail(event.target.value)}
                             placeholder="admin@example.com"
+                            suppressHydrationWarning
                             required
                             disabled={isSubmitting}
                             className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -83,7 +84,8 @@ export default function AdminLoginPage() {
                             autoComplete="current-password"
                             value={password}
                             onChange={(event) => setPassword(event.target.value)}
-                            placeholder="••••••••"
+                            placeholder="Enter password"
+                            suppressHydrationWarning
                             required
                             disabled={isSubmitting}
                             className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -102,6 +104,7 @@ export default function AdminLoginPage() {
                     <button
                         type="submit"
                         disabled={isSubmitting}
+                        suppressHydrationWarning
                         className="w-full rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {isSubmitting ? "Signing in..." : "Sign in"}

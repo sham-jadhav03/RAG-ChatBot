@@ -63,7 +63,15 @@ export function DocumentTable({ documents }: DocumentTableProps) {
                             className="transition-colors hover:bg-muted/20"
                         >
                             <td className="max-w-[360px] px-5 py-4">
-                                {/* existing document cell */}
+                                <div className="flex min-w-0 items-center gap-3">
+                                    <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
+                                        <FileText className="size-4 text-muted-foreground" />
+                                    </div>
+
+                                    <span className="truncate font-medium">
+                                        {document.fileName}
+                                    </span>
+                                </div>
                             </td>
 
                             <td className="px-5 py-4">
