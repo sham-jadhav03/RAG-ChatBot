@@ -6,7 +6,6 @@ export interface RegisterDTO {
   username: string;
   email: string;
   password: string;
-  role?: "admin" | "user";
 }
 
 export interface LoginDTO {
@@ -26,7 +25,7 @@ export interface AuthResponse {
 
 class authService {
   private generateToken(userId: string, role: string): string {
-    const secret = config.JWT_SECRET || "fallback_super_secret_key_123";
+    const secret = config.JWT_SECRET;
     const expiresIn = (config.JWT_EXPIRES_IN || "1h") as any;
 
     return jwt.sign({ id: userId, role }, secret, {
@@ -44,7 +43,7 @@ class authService {
   }
 
   async register(data: RegisterDTO): Promise<AuthResponse> {
-    const { username, email, password, role } = data;
+    const { username, email, password } = data;
 
     // Check if a user with the given email or username already exists
     const existingUser = await userModel.findOne({
@@ -59,7 +58,7 @@ class authService {
       username,
       email,
       password,
-      role: role || "admin",
+      role: "user",
     });
     const token = this.generateToken(user._id.toString(), user.role);
     return {

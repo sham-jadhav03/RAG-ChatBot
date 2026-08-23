@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { config } from "../config/config.js";
 
 // Extend Express Request interface to attach decoded user
 export interface AuthenticatedRequest extends Request {
@@ -26,7 +27,7 @@ export const authenticate = (
     }
 
     const token = authHeader.split(" ")[1];
-    const secret = process.env.JWT_SECRET || "fallback_super_secret_key_123";
+    const secret = config.JWT_SECRET;
 
     const decoded = jwt.verify(token, secret) as { id: string; role: string };
     req.user = decoded;

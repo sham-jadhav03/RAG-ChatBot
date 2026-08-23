@@ -28,11 +28,6 @@ export class AuthValidator {
       errors.push("Password is required and must be at least 6 characters long.");
     }
 
-    // 4. Role validation (optional field, but if provided must be 'admin' or 'user')
-    if (role && !["admin", "user"].includes(role)) {
-      errors.push("Role must be either 'admin' or 'user'.");
-    }
-
     // If validation errors exist, short-circuit request
     if (errors.length > 0) {
       res.status(400).json({

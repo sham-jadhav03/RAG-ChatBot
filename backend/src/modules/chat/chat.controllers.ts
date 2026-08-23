@@ -47,7 +47,9 @@ export async function getHistoryController(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const { sessionId } = req.params;
+    const sessionId = Array.isArray(req.params.sessionId)
+      ? req.params.sessionId[0]
+      : req.params.sessionId;
 
     const page = req.query.page 
       ? parseInt(req.query.page as string, 10) 

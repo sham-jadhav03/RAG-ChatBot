@@ -95,7 +95,7 @@ export async function reprocessController(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const { id } = req.params;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const document = await documentService.reprocessDocument(id);
 
     res.status(200).json({
