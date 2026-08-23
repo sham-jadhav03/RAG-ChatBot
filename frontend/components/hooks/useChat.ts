@@ -60,7 +60,7 @@ export function useChat({
 
         setMessages((current) => [...current, newMessage]);
 
-        // Invalidate chat-history query so it refetches cleanly when needed
+        // Keep React Query cache fresh
         queryClient.invalidateQueries({
           queryKey: ["chat-history", sessionId],
         });
@@ -88,6 +88,10 @@ export function useChat({
     setPendingQuestion(null);
   }, []);
 
+  const dismissError = useCallback(() => {
+    setError(null);
+  }, []);
+
   return {
     messages,
     isLoading,
@@ -95,5 +99,6 @@ export function useChat({
     error,
     sendMessage,
     resetMessages,
+    dismissError,
   };
 }
