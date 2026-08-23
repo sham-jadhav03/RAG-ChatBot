@@ -5,6 +5,9 @@ import type {
   Document,
   DocumentListData,
   DocumentListParams,
+  ChatHistoryData,
+  AskQuestionRequest,
+  AskQuestionRequestData,
   LoginRequest,
   RegisterRequest,
 } from "@/lib/types";
@@ -206,5 +209,31 @@ export const documentsApi = {
     return request<Document>(`/api/documents/${documentId}/reprocess`, {
       method: "GET",
     });
+  },
+};
+
+//ChatApi
+
+export const chatapi = {
+  async ask(payload: AskQuestionRequest,): Promise<AskQuestionRequestData>{
+    return request<AskQuestionRequestData>("/api/chat/ask", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async history(
+    sessionId: string,
+    page: number,
+    limit: number,
+  ): Promise<ChatHistoryData> {
+    const searchParams = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+    });
+
+    return request<ChatHistoryData>(
+      `/api/chat/${encodeURIComponent(sessionId)}/history?${searchParams.toString()}`,
+    );
   },
 };

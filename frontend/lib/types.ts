@@ -88,3 +88,46 @@ export interface DocumentListParams {
   page?: number;
   limit?: number;
 }
+
+// Chat
+
+export interface ChatSource {
+  documentName: string;
+  pageNumber: number | null;
+  excerpt: string;
+  similarity: number;
+}
+
+export interface AskQuestionRequest {
+  sessionId: string;
+  documentId: string;
+  question: string;
+}
+
+export interface AskQuestionRequestData {
+  sessionId: string;
+  documentId: string;
+  question: string;
+  answer: string;
+  sources: ChatSource[];
+  suggestedQuestions: string[];
+  requestId?: string;
+  createdAt: string;
+}
+
+export interface ChatHistoryEntry {
+  question: string;
+  answer: string;
+  sources: ChatSource[];
+  suggestedQuestions: string[];
+  requestId?: string;
+  createdAt: string;
+}
+
+export interface ChatHistoryData {
+  messages: ChatHistoryEntry[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}

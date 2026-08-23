@@ -142,15 +142,15 @@ class ChromaVectorStore:
                 include=["documents", "metadatas", "distances"],
             )
             
-            if not results or not results["documents"]:
+            if not results or not results.get("documents") or not results["documents"][0]:
                 logger.debug(f"No results found for document {document_id}")
                 return []
             
             # Format results
             formatted_results = []
             documents = results["documents"][0]  # First (only) query
-            metadatas = results["metadatas"][0]
-            distances = results["distances"][0]
+            metadatas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(documents)
+            distances = results["distances"][0] if results.get("distances") and results["distances"][0] else [0.0] * len(documents)
             
             for doc, metadata, distance in zip(documents, metadatas, distances):
                 # Convert distance to similarity (cosine distance to similarity)
@@ -160,16 +160,19 @@ class ChromaVectorStore:
                 formatted_results.append({
                     "text": doc,
                     "similarity": similarity,
-                    "chunk_index": metadata.get("chunk_index", -1),
-                    "page_number": metadata.get("page", None),
+                    "chunk_index": metadata.get("chunk_index", -1) if isinstance(metadata, dict) else -1,
+                    "page_number": metadata.get("page", None) if isinstance(metadata, dict) else None,
                     "metadata": metadata,
                 })
             
-            logger.debug(
-                f"Found {len(formatted_results)} results "
-                f"(similarity: {formatted_results[0]['similarity']:.3f} - "
-                f"{formatted_results[-1]['similarity']:.3f})"
-            )
+            if formatted_results:
+                logger.debug(
+                    f"Found {len(formatted_results)} results "
+                    f"(similarity: {formatted_results[0]['similarity']:.3f} - "
+                    f"{formatted_results[-1]['similarity']:.3f})"
+                )
+            else:
+                logger.debug(f"No results found for document {document_id}")
             
             return formatted_results
             
