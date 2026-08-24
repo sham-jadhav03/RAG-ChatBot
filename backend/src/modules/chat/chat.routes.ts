@@ -1,13 +1,13 @@
 import express from "express";
 import * as chatController from "./chat.controllers.js";
 import chatValidator from "./chat.validators.js";
-import { chatRateLimiter } from "../../middleware/rateLimiter.middleware.js";
+// import { chatRateLimiter } from "../../middleware/rateLimiter.middleware.js";
 
 const router = express.Router();
 
 router.post(
   "/ask",
-  chatRateLimiter,
+  // chatRateLimiter,
   chatValidator.validateAskQuestion,
   chatController.askQuestionController,
 );
