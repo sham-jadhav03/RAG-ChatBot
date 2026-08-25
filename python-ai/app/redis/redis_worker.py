@@ -15,7 +15,7 @@ _MAX_BACKOFF_S = 60.0
 _BACKOFF_FACTOR = 2.0
 
 # Redis socket configuration for long-lived Pub/Sub connections
-_REDIS_SOCKET_TIMEOUT = 30.0        # read timeout (seconds)
+_REDIS_SOCKET_TIMEOUT = 30.0         # read timeout (seconds)
 _REDIS_SOCKET_CONNECT_TIMEOUT = 10.0 # connect timeout (seconds)
 _REDIS_HEALTH_CHECK_INTERVAL = 15    # keepalive ping interval (seconds)
 
@@ -210,7 +210,7 @@ class RedisWorker:
                 "chunksCreated": len(chunks),
                 "embeddingsGenerated": len(embeddings),
                 "totalTokens": token_count,
-                "error": None,
+                "errorMessage": None,
                 "timestamp": datetime.utcnow().isoformat() + "Z",  
             }
 
@@ -235,7 +235,7 @@ class RedisWorker:
                 "chunksCreated": 0,
                 "embeddingsGenerated": 0,
                 "totalTokens": 0,
-                "error": error_msg,
+                "errorMessage": error_msg,
                 "timestamp": datetime.utcnow().isoformat() + "Z"
             })
 
@@ -257,7 +257,7 @@ class RedisWorker:
                 "chunksCreated": 0,
                 "embeddingsGenerated": 0,
                 "totalTokens": 0,
-                "error": error_msg,
+                "errorMessage": error_msg,
                 "timestamp": datetime.utcnow().isoformat() + "Z",
             })
             
@@ -282,7 +282,7 @@ class RedisWorker:
                 "chunksCreated": 0,
                 "embeddingsGenerated": 0,
                 "totalTokens": 0,
-                "error": error_msg,
+                "errorMessage": error_msg,
                 "timestamp": datetime.utcnow().isoformat() + "Z",
             })
 

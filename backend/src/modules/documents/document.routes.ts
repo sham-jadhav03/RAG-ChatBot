@@ -1,8 +1,8 @@
 import express from "express";
-import { uploadMiddleware } from "./document.service";
-import * as documentController from "./document.controller";
-import { authenticate, requireAdmin } from "../../middleware/auth.middleware";
-import DocumentValidator from "./document.validators";
+import { uploadMiddleware } from "./document.service.js";
+import * as documentController from "./document.controller.js";
+import { authenticate, requireAdmin } from "../../middleware/auth.middleware.js";
+import DocumentValidator from "./document.validators.js";
 
 const router = express.Router();
 

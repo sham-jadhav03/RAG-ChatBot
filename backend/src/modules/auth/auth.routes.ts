@@ -1,10 +1,10 @@
 import express from 'express';
-import * as authController from './auth.controllers';
-import { AuthValidator } from './auth.validators';
+import * as authController from './auth.controllers.js';
+import { AuthValidator } from './auth.validators.js';
 import {
   registerRateLimiter,
   loginRateLimiter,
-} from '../../middleware/rateLimiter.middleware';
+} from '../../middleware/rateLimiter.middleware.js';
 
 const router = express.Router();
 
