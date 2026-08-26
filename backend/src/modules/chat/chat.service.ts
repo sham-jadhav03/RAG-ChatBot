@@ -230,7 +230,15 @@ class chatService {
       document.fileName,
     );
 
-    // 10. Persist only successful Q&A exchanges.
+    // 10. Re-verify document still exists (prevents REL-03 race: deleted during AI processing).
+    const stillExists = await documentModel.findById(documentId).select("_id").lean();
+    if (!stillExists) {
+      const error = new Error("Document was deleted while processing your question.");
+      (error as any).statusCode = 410;
+      throw error;
+    }
+
+    // 11. Persist only successful Q&A exchanges.
     const savedMessage = await chatMessageModel.create({
       sessionId,
       documentId,

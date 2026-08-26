@@ -33,6 +33,7 @@ class RedisWorker:
         self.redis_client = None
         self.pubsub = None
         self.publisher = None
+        self._active_tasks = set()
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -97,8 +98,14 @@ class RedisWorker:
         self.publisher = None
 
     async def cleanup(self):
-        """Close Redis connections (used for graceful shutdown)"""
+        """Close Redis connections and cancel in-flight tasks (used for graceful shutdown)"""
         try:
+            if self._active_tasks:
+                for task in list(self._active_tasks):
+                    task.cancel()
+                await asyncio.gather(*self._active_tasks, return_exceptions=True)
+                self._active_tasks.clear()
+
             if self.pubsub:
                 await self.pubsub.unsubscribe()
                 await self.pubsub.close()
@@ -375,6 +382,28 @@ class RedisWorker:
                 "timestamp": datetime.utcnow().isoformat() + "Z",
             })
  
+    def _dispatch_message(self, channel: str, payload: Dict[str, Any]):
+        """
+        Dispatch message processing to a concurrent background task.
+        Prevents slow LLM or PDF ingestion calls from blocking the Redis listener loop.
+        """
+        task = asyncio.create_task(self._safe_route_message(channel, payload))
+        self._active_tasks.add(task)
+        task.add_done_callback(self._active_tasks.discard)
+
+    async def _safe_route_message(self, channel: str, payload: Dict[str, Any]):
+        """Safely route and handle a message in the background, logging any unhandled errors."""
+        try:
+            await self.route_message(channel, payload)
+        except asyncio.CancelledError:
+            # Propagate cancellation for graceful shutdown
+            raise
+        except Exception as e:
+            logger.error(
+                f"Error processing background message on {channel}: {e}",
+                exc_info=True,
+            )
+
     async def route_message(self, channel: str, payload: Dict[str, Any]):
         """
         Route incoming message to appropriate handler based on channel
@@ -440,17 +469,10 @@ class RedisWorker:
                         try:
                             payload = json.loads(data)
                             logger.debug(f"Message on {channel}: {payload.get('type', 'unknown')}")
-                            await self.route_message(channel, payload)
+                            self._dispatch_message(channel, payload)
                         except json.JSONDecodeError as e:
                             logger.error(f"Invalid JSON from {channel}: {e}")
                             logger.error(f"Raw data: {data}")
-                        except Exception as e:
-                            # Application-level error in message handler — log but
-                            # do NOT crash the listener loop.
-                            logger.error(
-                                f"Error processing message on {channel}: {e}",
-                                exc_info=True,
-                            )
 
             except asyncio.CancelledError:
                 logger.info("Redis worker listener cancelled — shutting down")
