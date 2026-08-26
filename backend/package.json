@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch server.ts",
     "build": "tsc",
+    "start": "tsx server.ts",
     "watch": "tsc --watch",
     "test": "tsx --test ./tests/**/*.test.ts"
   },

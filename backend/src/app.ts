@@ -1,24 +1,27 @@
 import express, { Request, Response } from "express";
 import morgan from "morgan";
 import cors from "cors";
+import { config } from "./config/config.js";
 
 const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
-app.use(cors({
-  origin: "http://localhost:3000",
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: config.CORS_ORIGIN,
+    credentials: true,
+  }),
+);
 
 app.get("/", (req: Request, res: Response) => {
   res.send("Hello from server");
 });
 
-import authRoutes from "./modules/auth/auth.routes";
-import documentRoutes from "./modules/documents/document.routes";
-import chatRoutes from "./modules/chat/chat.routes";
+import authRoutes from "./modules/auth/auth.routes.js";
+import documentRoutes from "./modules/documents/document.routes.js";
+import chatRoutes from "./modules/chat/chat.routes.js";
 
 app.use("/api/auth", authRoutes);
 app.use("/api/documents", documentRoutes);
