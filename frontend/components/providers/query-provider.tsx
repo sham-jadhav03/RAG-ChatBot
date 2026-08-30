@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 
 export function QueryProvider({ children }: { children: React.ReactNode }) {
-     // useState ensures one QueryClient per component tree, not recreated
+  // useState ensures one QueryClient per component tree, not recreated
   // on every render.
     const [queryClient] = useState(
         () => 
