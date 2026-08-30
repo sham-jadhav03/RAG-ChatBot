@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import authService from "./auth.service";
+import authService from "./auth.service.js";
 
 // POST /api/auth/register
 export async function register(req: Request, res: Response, next: NextFunction): Promise<void> {
