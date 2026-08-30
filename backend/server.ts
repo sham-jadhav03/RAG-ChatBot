@@ -5,8 +5,8 @@ import "./src/redis/subscriber.js"
 
 connectDB();
 
-const PORT = config.PORT || 4000;
+const PORT = Number(config.PORT) || 4000;
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port 4000`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server is running on port ${PORT}`);
 });

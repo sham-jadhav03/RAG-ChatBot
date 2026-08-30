@@ -9,10 +9,10 @@ class Config:
     """Application configuration from environment variables"""
 
     # Redis configuration
-    REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+    REDIS_URL = os.getenv("REDIS_URL")
 
     # MONGO_URI configuration
-    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/rag_database")
+    MONGO_URI = os.getenv("MONGO_URI")
 
     # CHROMA configuration
     CHROMA_PATH = os.getenv("CHROMA_PATH", "./chroma_data")

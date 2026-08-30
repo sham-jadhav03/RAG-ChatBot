@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.venv
+venv
+.env
+.env.*
+chroma_data
+uploads
+.git
+.gitignore
+*.log
+.pytest_cache

@@ -1,0 +1,61 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: rag-redis
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  python-ai:
+    build:
+      context: ./python-ai
+    container_name: rag-python
+    restart: unless-stopped
+    env_file:
+      - ./python-ai/.env
+    environment:
+      CHROMA_PATH: /data/chroma
+      FASTAPI_HOST: 0.0.0.0
+      FASTAPI_PORT: 8000
+      FASTAPI_RELOAD: "false"
+      REDIS_URL: redis://redis:6379
+    depends_on: 
+      - redis
+    volumes: 
+      - chroma_data:/data/chroma
+    ports:
+      - "8000:8000"
+
+  backend:
+    build:
+      context: ./backend
+    container_name: rag-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      PORT: 4000
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
+      - python-ai
+    ports:
+      - "4000:4000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: rag-frontend
+    restart: unless-stopped
+    env_file:
+      - ./frontend/env
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  redis_data:
+  chroma_data:

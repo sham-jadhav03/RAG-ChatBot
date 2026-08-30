@@ -1,6 +1,6 @@
 import { Response, NextFunction } from "express";
-import { AuthenticatedRequest } from "../../middleware/auth.middleware";
-import documentService from "./document.service";
+import { AuthenticatedRequest } from "../../middleware/auth.middleware.js";
+import documentService from "./document.service.js";
 
 /**
  * POST /api/documents/upload
