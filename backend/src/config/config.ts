@@ -33,6 +33,18 @@ if (!process.env.CORS_ORIGIN) {
   throw new Error("CORS_ORIGIN is required in environmental variable");
 }
 
+if (!process.env.INITIAL_ADMIN_USERNAME) {
+  throw new Error("INITIAL_ADMIN_USERNAME is required in environmental variable");
+}
+
+if (!process.env.INITIAL_ADMIN_PASSWORD) {
+  throw new Error("INITIAL_ADMIN_PASSWORD is required in environmental variable");
+}
+
+if (!process.env.INITIAL_ADMIN_EMAIL) {
+  throw new Error("INITIAL_ADMIN_EMAIL is required in environmental variable");
+}
+
 
 export const config = {
   PORT: process.env.PORT,
@@ -44,4 +56,7 @@ export const config = {
   IMAGEKIT_URL_ENDPOINT: process.env.IMAGEKIT_URL_ENDPOINT,
   REDIS_URL: process.env.REDIS_URL,
   CORS_ORIGIN: process.env.CORS_ORIGIN,
+  INITIAL_ADMIN_USERNAME: process.env.INITIAL_ADMIN_USERNAME,
+  INITIAL_ADMIN_PASSWORD: process.env.INITIAL_ADMIN_PASSWORD,
+  INITIAL_ADMIN_EMAIL: process.env.INITIAL_ADMIN_EMAIL,
 };
