@@ -6,29 +6,31 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-export default function AdminLoginPage() {
-    const router = useRouter();
-    const { login } = useAuth();
+export default function AdminRegisterPage() {
+    const router = useRouter()
 
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [error, setError] = useState("");
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    const { register } = useAuth()
 
-    async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    const [email, setEmail] = useState("")
+    const [password, setPassword] = useState("")
+    const [username, setUsername] = useState("")
+    const [error, setError] = useState("")
+    const [isSubmitting, setIsSubmitting] = useState(false)
+
+    const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
 
-        setError("");
+        setError("")
         setIsSubmitting(true);
 
         try {
-            await login({ email, password });
+            await register({ username, email, password });
             router.replace("/admin");
         } catch (error) {
             if (error instanceof ApiError) {
                 setError(error.message);
             } else {
-                setError("Unable to sign in. Please try again.");
+                setError("Unable to register. Please try again.");
             }
         } finally {
             setIsSubmitting(false);
@@ -44,15 +46,35 @@ export default function AdminLoginPage() {
                     </p>
 
                     <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-                        Admin Login
+                        Admin Register
                     </h1>
 
                     <p className="mt-2 text-sm text-muted-foreground">
-                        Sign in to manage your document knowledge base.
+                        Create an account to manage your document knowledge base.
                     </p>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-5">
+                    <div className="space-y-2">
+                        <label htmlFor="username" className="text-sm font-medium">
+                            Username
+                        </label>
+
+                        <input
+                            id="username"
+                            name="username"
+                            type="text"
+                            autoComplete="username"
+                            value={username}
+                            onChange={(event) => setUsername(event.target.value)}
+                            placeholder="Enter username"
+                            suppressHydrationWarning
+                            required
+                            disabled={isSubmitting}
+                            className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                    </div>
+                    
                     <div className="space-y-2">
                         <label htmlFor="email" className="text-sm font-medium">
                             Email
@@ -82,7 +104,7 @@ export default function AdminLoginPage() {
                             id="password"
                             name="password"
                             type="password"
-                            autoComplete="current-password"
+                            autoComplete="new-password"
                             value={password}
                             onChange={(event) => setPassword(event.target.value)}
                             placeholder="Enter password"
@@ -108,14 +130,14 @@ export default function AdminLoginPage() {
                         suppressHydrationWarning
                         className="w-full rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        {isSubmitting ? "Signing in..." : "Sign in"}
+                        {isSubmitting ? "Registering..." : "Register"}
                     </button>
                 </form>
 
                 <p className="mt-4 text-center text-sm text-muted-foreground">
-                    Don't have an account?{" "}
-                    <Link href="/admin/register" className="font-medium text-primary hover:underline">
-                        Register
+                    Already have an account?{" "}
+                    <Link href="/admin/login" className="font-medium text-primary hover:underline">
+                        Sign in
                     </Link>
                 </p>
             </div>

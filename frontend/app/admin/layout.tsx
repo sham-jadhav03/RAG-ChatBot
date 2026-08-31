@@ -7,16 +7,16 @@ import { AdminShell } from "@/components/admin/admin-shell";
 
 export default function AdminLayout({ children }: Readonly<{ children: React.ReactNode }>) {
     const router = useRouter();
-
     const pathname = usePathname();
-
     const { isAuthenticated, isLoading } = useAuth();
 
+    const isAuthPage = pathname === "/admin/login" || pathname === "/admin/register";
+
     useEffect(() => {
-        if (!isLoading && !isAuthenticated && pathname !== "/admin/login") {
+        if (!isLoading && !isAuthenticated && !isAuthPage) {
             router.replace("/admin/login");
         }
-    }, [isAuthenticated, isLoading, pathname, router]);
+    }, [isAuthenticated, isLoading, pathname, router, isAuthPage]);
 
     if (isLoading) {
         return (
@@ -25,11 +25,15 @@ export default function AdminLayout({ children }: Readonly<{ children: React.Rea
                     Checking authentication...
                 </p>
             </main>
-        )
+        );
     }
 
-    if (!isAuthenticated && pathname !== "/admin/login") {
+    if (!isAuthenticated && !isAuthPage) {
         return null;
+    }
+
+    if (isAuthPage) {
+        return <>{children}</>;
     }
 
     return <AdminShell>{children}</AdminShell>;

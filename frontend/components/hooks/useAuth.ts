@@ -7,14 +7,15 @@ import {
     removeAuthToken,
     setAuthToken,
 } from "@/lib/auth";
-import type { AuthResponseData, LoginRequest } from "@/lib/types";
+import type { AuthResponseData, LoginRequest, RegisterRequest } from "@/lib/types";
 import { useCallback, useState, useSyncExternalStore } from "react";
 
 interface UseAuthReturn {
     user: AuthResponseData["user"] | null;
     isAuthenticated: boolean;
     isLoading: boolean;
-    login:(credentials: LoginRequest) => Promise<void>;
+    login: (credentials: LoginRequest) => Promise<void>;
+    register: (credentials: RegisterRequest) => Promise<void>;
     logout: () => void;
 }
 
@@ -33,6 +34,12 @@ export function useAuth(): UseAuthReturn {
     const token = useSyncExternalStore(subscribeToAuthToken, getAuthToken, () => null);
     const isLoading = false;
 
+    const register = useCallback(async (credentials: RegisterRequest) => {
+        const response = await authApi.register(credentials);
+        setAuthToken(response.token);
+        setUser(response.user);
+    }, []);
+
     const login = useCallback(async (credentials: LoginRequest) => {
         const response = await authApi.login(credentials);
         setAuthToken(response.token);
@@ -49,6 +56,7 @@ export function useAuth(): UseAuthReturn {
         isAuthenticated: Boolean(user) || Boolean(token),
         isLoading,
         login,
+        register,
         logout
     }
 }
