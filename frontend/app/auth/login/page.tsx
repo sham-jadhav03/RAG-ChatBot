@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-export default function AdminLoginPage() {
+export default function LoginPage() {
     const router = useRouter();
     const { login } = useAuth();
 
@@ -22,8 +22,12 @@ export default function AdminLoginPage() {
         setIsSubmitting(true);
 
         try {
-            await login({ email, password });
-            router.replace("/admin");
+            const response = await login({ email, password });
+            if (response.user.role === "admin") {
+                router.replace("/admin");
+            } else {
+                router.replace("/");
+            }
         } catch (error) {
             if (error instanceof ApiError) {
                 setError(error.message);
@@ -44,11 +48,11 @@ export default function AdminLoginPage() {
                     </p>
 
                     <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-                        Admin Login
+                        Login
                     </h1>
 
                     <p className="mt-2 text-sm text-muted-foreground">
-                        Sign in to manage your document knowledge base.
+                        Sign in to your account.
                     </p>
                 </div>
 
@@ -114,7 +118,7 @@ export default function AdminLoginPage() {
 
                 <p className="mt-4 text-center text-sm text-muted-foreground">
                     Don't have an account?{" "}
-                    <Link href="/admin/register" className="font-medium text-primary hover:underline">
+                    <Link href="/auth/register" className="font-medium text-primary hover:underline">
                         Register
                     </Link>
                 </p>

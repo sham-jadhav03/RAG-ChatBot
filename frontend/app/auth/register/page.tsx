@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-export default function AdminRegisterPage() {
+export default function RegisterPage() {
     const router = useRouter()
 
     const { register } = useAuth()
@@ -14,6 +14,7 @@ export default function AdminRegisterPage() {
     const [email, setEmail] = useState("")
     const [password, setPassword] = useState("")
     const [username, setUsername] = useState("")
+    const [isAdmin, setIsAdmin] = useState(false)
     const [error, setError] = useState("")
     const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -24,8 +25,17 @@ export default function AdminRegisterPage() {
         setIsSubmitting(true);
 
         try {
-            await register({ username, email, password });
-            router.replace("/admin");
+            await register({
+                username,
+                email,
+                password,
+                role: isAdmin ? "admin" : "user",
+            });
+            if (isAdmin) {
+                router.replace("/admin");
+            } else {
+                router.replace("/");
+            }
         } catch (error) {
             if (error instanceof ApiError) {
                 setError(error.message);
@@ -46,11 +56,11 @@ export default function AdminRegisterPage() {
                     </p>
 
                     <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-                        Admin Register
+                        Register
                     </h1>
 
                     <p className="mt-2 text-sm text-muted-foreground">
-                        Create an account to manage your document knowledge base.
+                        Create an account to get started.
                     </p>
                 </div>
 
@@ -115,6 +125,21 @@ export default function AdminRegisterPage() {
                         />
                     </div>
 
+                    <div className="flex items-center space-x-2 pt-1">
+                        <input
+                            id="isAdmin"
+                            name="isAdmin"
+                            type="checkbox"
+                            checked={isAdmin}
+                            onChange={(event) => setIsAdmin(event.target.checked)}
+                            disabled={isSubmitting}
+                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                        <label htmlFor="isAdmin" className="text-sm font-medium leading-none cursor-pointer">
+                            Register as Admin <span className="text-muted-foreground">({isAdmin ? "admin" : "user"})</span>
+                        </label>
+                    </div>
+
                     {error && (
                         <div
                             role="alert"
@@ -136,7 +161,7 @@ export default function AdminRegisterPage() {
 
                 <p className="mt-4 text-center text-sm text-muted-foreground">
                     Already have an account?{" "}
-                    <Link href="/admin/login" className="font-medium text-primary hover:underline">
+                    <Link href="/auth/login" className="font-medium text-primary hover:underline">
                         Sign in
                     </Link>
                 </p>

@@ -16,7 +16,7 @@ export function AdminHeader() {
 
     // Full navigation ensures the admin layout re-evaluates
     // authentication state from localStorage.
-    router.replace("/admin/login");
+    router.replace("/auth/login");
   }
 
   return (

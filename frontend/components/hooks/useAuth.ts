@@ -1,9 +1,10 @@
 "use client";
 
-import {authApi} from "@/lib/api-client"
+import { authApi } from "@/lib/api-client";
 import {
     AUTH_TOKEN_CHANGED_EVENT,
     getAuthToken,
+    getAuthUser,
     removeAuthToken,
     setAuthToken,
 } from "@/lib/auth";
@@ -14,8 +15,8 @@ interface UseAuthReturn {
     user: AuthResponseData["user"] | null;
     isAuthenticated: boolean;
     isLoading: boolean;
-    login: (credentials: LoginRequest) => Promise<void>;
-    register: (credentials: RegisterRequest) => Promise<void>;
+    login: (credentials: LoginRequest) => Promise<AuthResponseData>;
+    register: (credentials: RegisterRequest) => Promise<AuthResponseData>;
     logout: () => void;
 }
 
@@ -30,33 +31,39 @@ function subscribeToAuthToken(onStoreChange: () => void): () => void {
 }
 
 export function useAuth(): UseAuthReturn {
-    const [user, setUser] = useState<AuthResponseData["user"] | null>(null);
     const token = useSyncExternalStore(subscribeToAuthToken, getAuthToken, () => null);
+    const storedUser = useSyncExternalStore(subscribeToAuthToken, getAuthUser, () => null);
+    const [user, setUser] = useState<AuthResponseData["user"] | null>(null);
+
+    const currentUser = user ?? storedUser;
+    const isAuthenticated = Boolean(currentUser) || Boolean(token);
     const isLoading = false;
 
     const register = useCallback(async (credentials: RegisterRequest) => {
         const response = await authApi.register(credentials);
-        setAuthToken(response.token);
+        setAuthToken(response.token, response.user);
         setUser(response.user);
+        return response;
     }, []);
 
     const login = useCallback(async (credentials: LoginRequest) => {
         const response = await authApi.login(credentials);
-        setAuthToken(response.token);
+        setAuthToken(response.token, response.user);
         setUser(response.user);
+        return response;
     }, []);
 
     const logout = useCallback(() => {
         removeAuthToken();
-        setUser(null)
+        setUser(null);
     }, []);
 
     return {
-        user,
-        isAuthenticated: Boolean(user) || Boolean(token),
+        user: currentUser,
+        isAuthenticated,
         isLoading,
         login,
         register,
-        logout
-    }
+        logout,
+    };
 }

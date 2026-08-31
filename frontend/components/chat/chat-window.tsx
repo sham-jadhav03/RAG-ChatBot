@@ -1,23 +1,34 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { Loader2, LogOut, Shield } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChatHistory } from "@/components/chat/chat-history";
 import { DocumentPicker } from "@/components/chat/document-picker";
 import { ErrorBanner } from "@/components/shared/error-banner";
+import { useAuth } from "@/components/hooks/useAuth";
 import { useChat } from "@/components/hooks/useChat";
 import { useChatHistory } from "@/components/hooks/useChatHistory";
 import { getOrCreateSession } from "@/lib/session";
 import type { Document } from "@/lib/types";
 
 export function ChatWindow() {
+  const router = useRouter();
+  const { user, logout } = useAuth();
+
   const [document, setDocument] = useState<Document | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  function handleLogout() {
+    logout();
+    router.replace("/auth/login");
+  }
 
   const {
     data: history,
@@ -85,11 +96,41 @@ export function ChatWindow() {
     <div className="flex min-h-screen flex-col bg-background">
       {/* Header */}
       <header className="border-b bg-card/50 backdrop-blur">
-        <div className="mx-auto w-full max-w-4xl px-4 py-4 sm:px-6">
-          <h1 className="text-lg font-semibold tracking-tight">RAG Chatbot</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Ask questions about your documents using AI-powered retrieval.
-          </p>
+        <div className="mx-auto flex w-full max-w-4xl items-center justify-between px-4 py-4 sm:px-6">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">RAG Chatbot</h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Ask questions about your documents using AI-powered retrieval.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {user?.role === "admin" && (
+              <Link
+                href="/admin"
+                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+              >
+                <Shield className="size-3.5" />
+                <span>Admin</span>
+              </Link>
+            )}
+
+            {user && (
+              <div className="hidden text-right sm:block">
+                <p className="text-sm font-medium">{user.username}</p>
+                <p className="text-xs text-muted-foreground">{user.email}</p>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+            >
+              <LogOut className="size-3.5" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
+          </div>
         </div>
       </header>
 
