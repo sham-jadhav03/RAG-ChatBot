@@ -4,6 +4,7 @@ import { AuthValidator } from "../src/modules/auth/auth.validators.js";
 import DocumentValidator from "../src/modules/documents/document.validators.js";
 import ChatValidator from "../src/modules/chat/chat.validators.js";
 import { pendingRequests } from "../src/redis/pendingRequests.js";
+import { authenticate, requireAdmin } from "../src/middleware/auth.middleware.js";
 
 describe("Phase 13A — Backend Baseline Tests", () => {
   describe("1. Auth Validation", () => {
@@ -48,6 +49,21 @@ describe("Phase 13A — Backend Baseline Tests", () => {
       assert.equal(nextCalled, false);
     });
 
+    it("rejects client-supplied role in registration", () => {
+      let statusCalled = 0;
+      let jsonBody: any = null;
+      const req: any = { body: { username: "attacker", email: "attacker@example.com", password: "Password123!", role: "admin" } };
+      const res: any = {
+        status(code: number) { statusCalled = code; return this; },
+        json(data: any) { jsonBody = data; return this; }
+      };
+      let nextCalled = false;
+      AuthValidator.validateRegister(req, res, () => { nextCalled = true; });
+      assert.equal(statusCalled, 400);
+      assert.equal(nextCalled, false);
+      assert.ok(jsonBody.errors.some((e: string) => e.includes("Role cannot be set")));
+    });
+
     it("passes valid registration and sanitizes input", () => {
       const req: any = { body: { username: "  alice  ", email: "  Alice@Example.COM  ", password: "Password123!" } };
       const res: any = {};
@@ -56,6 +72,7 @@ describe("Phase 13A — Backend Baseline Tests", () => {
       assert.equal(nextCalled, true);
       assert.equal(req.body.username, "alice");
       assert.equal(req.body.email, "alice@example.com");
+      assert.equal(req.body.role, undefined);
     });
   });
 
@@ -163,6 +180,53 @@ describe("Phase 13A — Backend Baseline Tests", () => {
       }, (err: any) => {
         return err.statusCode === 504;
       });
+    });
+  });
+
+  describe("5. RBAC & Auth Middleware", () => {
+    it("requireAdmin allows admin user", () => {
+      const req: any = { user: { id: "admin-1", role: "admin" } };
+      let statusCalled = 0;
+      const res: any = {
+        status(code: number) { statusCalled = code; return this; },
+        json() { return this; }
+      };
+      let nextCalled = false;
+      requireAdmin(req, res, () => { nextCalled = true; });
+      assert.equal(nextCalled, true);
+      assert.equal(statusCalled, 0);
+    });
+
+    it("requireAdmin rejects normal user with 403 Forbidden", () => {
+      const req: any = { user: { id: "user-1", role: "user" } };
+      let statusCalled = 0;
+      let jsonBody: any = null;
+      const res: any = {
+        status(code: number) { statusCalled = code; return this; },
+        json(data: any) { jsonBody = data; return this; }
+      };
+      let nextCalled = false;
+      requireAdmin(req, res, () => { nextCalled = true; });
+      assert.equal(nextCalled, false);
+      assert.equal(statusCalled, 403);
+      assert.equal(jsonBody?.success, false);
+      assert.ok(jsonBody?.message?.includes("Admin access required"));
+    });
+
+    it("authenticate rejects missing Authorization header with 401 Unauthorized", () => {
+      const req: any = { headers: {} };
+      let statusCalled = 0;
+      let jsonBody: any = null;
+      const res: any = {
+        status(code: number) { statusCalled = code; return this; },
+        json(data: any) { jsonBody = data; return this; }
+      };
+      let nextCalled = false;
+      authenticate(req, res, () => { nextCalled = true; });
+      assert.equal(nextCalled, false);
+      assert.equal(statusCalled, 401);
+      assert.equal(jsonBody?.success, false);
+      assert.ok(jsonBody?.message?.includes("Access denied"));
     });
   });
 });

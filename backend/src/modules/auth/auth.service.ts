@@ -6,7 +6,6 @@ export interface RegisterDTO {
   username: string;
   email: string;
   password: string;
-  role?: "admin" | "user";
 }
 
 export interface LoginDTO {
@@ -44,7 +43,7 @@ class authService {
   }
 
   async register(data: RegisterDTO): Promise<AuthResponse> {
-    const { username, email, password, role } = data;
+    const { username, email, password } = data;
 
     // Check if a user with the given email or username already exists
     const existingUser = await userModel.findOne({
@@ -59,7 +58,7 @@ class authService {
       username,
       email,
       password,
-      role: role === "admin" ? "admin" : "user",
+      role: "user",
     });
     const token = this.generateToken(user._id.toString(), user.role);
     return {

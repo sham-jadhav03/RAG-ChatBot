@@ -7,21 +7,20 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 export default function RegisterPage() {
-    const router = useRouter()
+    const router = useRouter();
 
-    const { register } = useAuth()
+    const { register } = useAuth();
 
-    const [email, setEmail] = useState("")
-    const [password, setPassword] = useState("")
-    const [username, setUsername] = useState("")
-    const [isAdmin, setIsAdmin] = useState(false)
-    const [error, setError] = useState("")
-    const [isSubmitting, setIsSubmitting] = useState(false)
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [username, setUsername] = useState("");
+    const [error, setError] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
 
-        setError("")
+        setError("");
         setIsSubmitting(true);
 
         try {
@@ -29,13 +28,8 @@ export default function RegisterPage() {
                 username,
                 email,
                 password,
-                role: isAdmin ? "admin" : "user",
             });
-            if (isAdmin) {
-                router.replace("/admin");
-            } else {
-                router.replace("/");
-            }
+            router.replace("/");
         } catch (error) {
             if (error instanceof ApiError) {
                 setError(error.message);
@@ -45,7 +39,7 @@ export default function RegisterPage() {
         } finally {
             setIsSubmitting(false);
         }
-    }
+    };
 
     return (
         <main className="flex min-h-screen items-center justify-center p-6">
@@ -123,21 +117,6 @@ export default function RegisterPage() {
                             disabled={isSubmitting}
                             className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                         />
-                    </div>
-
-                    <div className="flex items-center space-x-2 pt-1">
-                        <input
-                            id="isAdmin"
-                            name="isAdmin"
-                            type="checkbox"
-                            checked={isAdmin}
-                            onChange={(event) => setIsAdmin(event.target.checked)}
-                            disabled={isSubmitting}
-                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                        />
-                        <label htmlFor="isAdmin" className="text-sm font-medium leading-none cursor-pointer">
-                            Register as Admin <span className="text-muted-foreground">({isAdmin ? "admin" : "user"})</span>
-                        </label>
                     </div>
 
                     {error && (

@@ -28,6 +28,11 @@ export class AuthValidator {
       errors.push("Password is required and must be at least 6 characters long.");
     }
 
+    // 4. Role rejection: public registration cannot specify role
+    if (role !== undefined) {
+      errors.push("Role cannot be set during registration.");
+    }
+
     // If validation errors exist, short-circuit request
     if (errors.length > 0) {
       res.status(400).json({
@@ -41,6 +46,7 @@ export class AuthValidator {
     // Sanitize email and username for consistency
     req.body.email = email.trim().toLowerCase();
     req.body.username = username.trim();
+    delete req.body.role;
 
     next();
   }

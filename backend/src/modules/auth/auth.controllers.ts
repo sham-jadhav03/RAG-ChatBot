@@ -4,7 +4,7 @@ import authService from "./auth.service.js";
 // POST /api/auth/register
 export async function register(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { username, email, password, role } = req.body;
+    const { username, email, password } = req.body;
 
     if (!username || !email || !password) {
       res.status(400).json({
@@ -18,7 +18,6 @@ export async function register(req: Request, res: Response, next: NextFunction):
       username,
       email,
       password,
-      role: role === "admin" ? "admin" : "user",
     });
 
     res.status(201).json({
