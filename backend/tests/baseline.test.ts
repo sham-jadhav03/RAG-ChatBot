@@ -1,5 +1,7 @@
 import { test, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import jwt from "jsonwebtoken";
+import { config } from "../src/config/config.js";
 import { AuthValidator } from "../src/modules/auth/auth.validators.js";
 import DocumentValidator from "../src/modules/documents/document.validators.js";
 import ChatValidator from "../src/modules/chat/chat.validators.js";
@@ -227,6 +229,44 @@ describe("Phase 13A — Backend Baseline Tests", () => {
       assert.equal(statusCalled, 401);
       assert.equal(jsonBody?.success, false);
       assert.ok(jsonBody?.message?.includes("Access denied"));
+    });
+
+    it("authenticate rejects invalid or expired token with 401 Unauthorized", () => {
+      const req: any = { headers: { authorization: "Bearer invalid.jwt.token" } };
+      let statusCalled = 0;
+      let jsonBody: any = null;
+      const res: any = {
+        status(code: number) { statusCalled = code; return this; },
+        json(data: any) { jsonBody = data; return this; }
+      };
+      let nextCalled = false;
+      authenticate(req, res, () => { nextCalled = true; });
+      assert.equal(nextCalled, false);
+      assert.equal(statusCalled, 401);
+      assert.equal(jsonBody?.success, false);
+      assert.ok(jsonBody?.message?.includes("Invalid or expired token"));
+    });
+
+    it("authenticate allows valid User(Employee) token without requireAdmin", () => {
+      const userToken = jwt.sign({ id: "user-123", role: "user" }, config.JWT_SECRET);
+      const req: any = { headers: { authorization: `Bearer ${userToken}` } };
+      const res: any = {};
+      let nextCalled = false;
+      authenticate(req, res, () => { nextCalled = true; });
+      assert.equal(nextCalled, true);
+      assert.equal(req.user?.id, "user-123");
+      assert.equal(req.user?.role, "user");
+    });
+
+    it("authenticate allows valid Admin(HR) token", () => {
+      const adminToken = jwt.sign({ id: "admin-123", role: "admin" }, config.JWT_SECRET);
+      const req: any = { headers: { authorization: `Bearer ${adminToken}` } };
+      const res: any = {};
+      let nextCalled = false;
+      authenticate(req, res, () => { nextCalled = true; });
+      assert.equal(nextCalled, true);
+      assert.equal(req.user?.id, "admin-123");
+      assert.equal(req.user?.role, "admin");
     });
   });
 });

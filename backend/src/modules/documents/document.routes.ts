@@ -6,10 +6,11 @@ import DocumentValidator from "./document.validators.js";
 
 const router = express.Router();
 
-router.use(authenticate, requireAdmin);
+router.use(authenticate);
 
 router.post(
   "/upload",
+  requireAdmin,
   uploadMiddleware.single("file"),
   DocumentValidator.validateUpload,
   documentController.uploadController,
@@ -23,12 +24,14 @@ router.get(
 
 router.delete(
   "/:id",
+  requireAdmin,
   DocumentValidator.validateDocumentId,
   documentController.deleteController,
 );
 
 router.get(
   "/:id/reprocess",
+  requireAdmin,
   DocumentValidator.validateDocumentId,
   documentController.reprocessController,
 );
