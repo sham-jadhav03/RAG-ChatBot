@@ -56,10 +56,7 @@ export function createRateLimiter(options: RateLimiterOptions) {
     } catch (error: any) {
       console.error("Rate limiter error:", error.message);
       // Fail closed: reject request safely if rate-limit evaluation fails
-      res.status(503).json({
-        success: false,
-        message: "Service is temporarily unavailable. Please try again later.",
-      });
+      next()
     }
   };
 }
