@@ -1,7 +1,7 @@
 import logging
 from langgraph.graph import StateGraph
 from .state import ChatState
-from .nodes import retrieve_node, generate_node, suggest_node
+from .nodes import retrieve_node, generate_node
 
 logger = logging.getLogger(__name__)
 
@@ -9,7 +9,13 @@ logger = logging.getLogger(__name__)
 def build_rag_graph():
     """
     Build the RAG workflow graph
-    Flow: input → retrieve → generate → suggest → output
+    Flow: 
+        input → retrieve → generate → suggest → output
+    The generate node now produces:
+        - answer
+        - suggested_questions
+
+    using a single LLM call.   
     """
     try:
         logger.info("Building RAG graph...")
@@ -20,15 +26,13 @@ def build_rag_graph():
         # Add nodes
         graph.add_node("retrieve", retrieve_node)
         graph.add_node("generate", generate_node)
-        graph.add_node("suggest", suggest_node)
 
         # Add edges (sequential flow)
         graph.add_edge("retrieve", "generate")
-        graph.add_edge("generate", "suggest")
 
         # Set entry and exit
         graph.set_entry_point("retrieve")
-        graph.set_finish_point("suggest")
+        graph.set_finish_point("generate")
 
         # Compile
         compiled_graph = graph.compile()
@@ -37,7 +41,10 @@ def build_rag_graph():
         return compiled_graph
     
     except Exception as e:
-        logger.error(f"Error building graph: {e}", exc_info=True)
+        logger.error(
+            f"Error building graph: {e}",
+            exc_info=True
+        )
         raise
 
 
@@ -55,16 +62,17 @@ def get_rag_graph():
     return _graph
 
 
-async def invoke_rag_graph(question: str, session_id: str, history: list, document_id: str = "") -> ChatState:
+async def invoke_rag_graph(
+        question: str, 
+        session_id: str, 
+        history: list, 
+        document_id: str = ""
+    ) -> ChatState:
     """
-    Run the RAG workflow
-    Args:
-        question: User question
-        session_id: Session ID
-        history: Conversation history    
-        document_id: Document ID for vector collection search
-    Returns:
-        Final ChatState with answer + suggestions
+    Run the RAG workflow.
+
+    Flow:
+        retrieve → generate(answer + suggestions)
     """
 
     try:
@@ -79,8 +87,11 @@ async def invoke_rag_graph(question: str, session_id: str, history: list, docume
         )
 
         # Invoke graph
-        logger.info(f"Invoking RAG graph for: {question[:50]}...")
+        logger.info(
+            f"Invoking RAG graph for: {question[:50]}..."
+        )
 
+        # Invoke graph
         final_state = await graph.ainvoke(state)
 
         logger.info(f"Rag graph complete")

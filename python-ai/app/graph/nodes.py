@@ -19,13 +19,16 @@ _llm = None
 def get_llm():
     """Get or create a global ChatGoogleGenerativeAI instance."""
     global _llm
+
     if _llm is None:
         from langchain_google_genai import ChatGoogleGenerativeAI
+
         _llm = ChatGoogleGenerativeAI(
             model=config.LLM_MODEL,
             api_key=config.GEMINI_API_KEY,
-            temperature=0.7,
+            thinking_level="low",
         )
+
     return _llm
 
 
@@ -48,7 +51,12 @@ async def retrieve_node(state: ChatState) -> ChatState:
         query_embedding = await embedder.embed_query(state.question)
 
         # Search Chroma using document_id as collection name (fallback to session_id if empty)
-        search_target = state.document_id if state.document_id else state.session_id
+        search_target = (
+            state.document_id
+            if state.document_id
+            else state.session_id
+        )
+
         try:
             results = await vector_store.search(
                 document_id=search_target,
@@ -63,6 +71,7 @@ async def retrieve_node(state: ChatState) -> ChatState:
 
         # Build context string AFTER the loop
         context_parts = []
+
         for i, doc in enumerate(results, 1):
             text = doc.get("text", "")
             similarity = doc.get("similarity", 0)
@@ -90,142 +99,230 @@ async def retrieve_node(state: ChatState) -> ChatState:
 
 
 # ---------------------------------------------------------------------------
-# Node 2 — Generate
+# Node 2 — Generate Answer + Suggestions
 # ---------------------------------------------------------------------------
 
 async def generate_node(state: ChatState) -> ChatState:
     """
-    Node 2: Generate answer using LLM.
-    Takes context + question → calls Gemini → returns answer.
+    Generate the answer AND suggested follow-up questions
+    using a SINGLE Gemini LLM call.
     """
+
     try:
         logger.debug(f"Generate Node: {state.question[:50]}...")
 
-        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+        from langchain_core.messages import (
+            HumanMessage,
+            SystemMessage,
+            AIMessage,
+        )
 
         llm = get_llm()
 
+        # System prompt
         system_prompt = (
-            "You are a helpful AI assistant that answers questions based on provided documents.\n\n"
+            "You are a helpful AI assistant that answers questions "
+            "based on provided documents.\n\n"
+
             "Rules:\n"
-            "1. Answer questions ONLY based on the provided context\n"
-            "2. If context doesn't contain the answer, say \"I don't have information about that\"\n"
-            "3. Cite your sources when possible\n"
-            "4. Be concise but informative\n"
-            "5. If the question is not related to the documents, politely decline"
+            "1. Answer questions ONLY based on the provided context.\n"
+            "2. If context doesn't contain the answer, say "
+            "\"I don't have information about that\".\n"
+            "3. Cite sources when possible.\n"
+            "4. Be concise but informative.\n"
+            "5. If the question is not related to the documents, "
+            "politely decline.\n\n"
+
+            "You must return ONLY valid JSON with this exact structure:\n"
+            "{\n"
+            '  "answer": "your answer here",\n'
+            '  "suggested_questions": [\n'
+            '    "follow-up question 1",\n'
+            '    "follow-up question 2",\n'
+            '    "follow-up question 3"\n'
+            "  ]\n"
+            "}\n\n"
+
+            "The answer should be concise and useful. "
+            "Generate 3 relevant follow-up questions."
         )
 
-        # Build conversation history messages
+        # Conversation history
         messages = []
+
         for msg in state.conversation_history:
             role = msg.get("role", "user")
             content = msg.get("content", "")
+
             if role == "user":
                 messages.append(("user", content))
             else:
-                messages.append(("assistant", content))
+                messages.append(("assistant", content))  
 
-        # Build the current user message with context
+        # Current user message
         if state.context:
             user_message = (
-                f"Context from documents:\n{state.context}\n\n"
+                f"Context from documents:\n"
+                f"{state.context}\n\n"
                 f"Question: {state.question}\n\n"
-                f"Please answer based on the context above."
+                f"Please answer based only on the context above."
             )
         else:
             user_message = (
-                f"No relevant documents found.\n\n"
+                "No relevant documents were found.\n\n"
                 f"Question: {state.question}\n\n"
-                f"Please let the user know you couldn't find relevant information."
+                "Please tell the user that you couldn't find "
+                "relevant information."
             )
-            messages = []  # Don't use history if no context
+
+            # No point sending previous conversation when
+            # there is no userful document context
+            messages = []
 
         messages.append(("user", user_message))
 
-        # Format for LangChain
-        formatted_messages = [SystemMessage(content=system_prompt)]
+        # Conver to LangChain messages
+
+        formatted_messages = [
+            SystemMessage(content=system_prompt)
+        ]
+
         for role, content in messages:
             if role == "user":
-                formatted_messages.append(HumanMessage(content=content))
+                formatted_messages.append(
+                    HumanMessage(content=content)
+                )
             else:
-                formatted_messages.append(AIMessage(content=content))
+                formatted_messages.append(
+                    AIMessage(content=content)
+                )
+
+        # ONE Gemini call
 
         response = await llm.ainvoke(formatted_messages)
 
-        # Gemini/LangChain may return either a plain string or
-        # structured content blocks. ChatState.answer must always be a string.
-        if isinstance(response.content, str): 
-            state.answer = response.content  
-        elif isinstance(response.content, list):
-            state.answer = "".join(
-                block.get("text", "")
-                for block in response.content
-                if isinstance(block, dict) and block.get("type") == "text"
-            )
+        # Normalize Gemini response content
+        raw_content = response.content
+
+        if isinstance(raw_content, str):
+            content = raw_content.strip()
+
+        elif isinstance(raw_content, list):
+            text_parts = []
+
+            for block in raw_content:
+                # Gemini/LangChain content block as dict
+                if isinstance(block, dict):
+                    text = block.get("text", "") 
+
+                    if isinstance(text, str):
+                        text_parts.append(text)
+
+                # Fallback for object-style content block
+                elif hasattr(block, "text"):
+                    text = getattr(block, "text", None)
+
+                    if isinstance(text, str):
+                        text_parts.append(text)
+
+            content = "".join(text_parts).strip()              
+
         else:
-            state.answer = str(response.content)    
-        logger.debug(f"Generated answer: {state.answer[:50]}...")
-        return state
+            content = str(response.content).strip()
 
-    except Exception as e:
-        logger.error(f"Generate node error: {e}", exc_info=True)
-        state.error = f"Answer generation failed: {str(e)}"
-        state.answer = "I encountered an error while generating a response. Please try again."
-        return state
-
-
-# ---------------------------------------------------------------------------
-# Node 3 — Suggest
-# ---------------------------------------------------------------------------
-
-async def suggest_node(state: ChatState) -> ChatState:
-    """
-    Node 3: Generate suggested follow-up questions.
-    Takes answer + context → calls LLM → returns 3-5 suggestions.
-    """
-    try:
-        logger.debug("Suggest Node...")
-
-        from langchain_core.messages import HumanMessage
-
-        llm = get_llm()
-
-        suggestion_prompt = (
-            f"Based on the following Q&A, suggest 3-5 follow-up questions the user might ask.\n\n"
-            f"Question: {state.question}\n"
-            f"Answer: {state.answer[:500]}\n\n"
-            f"Format your response as a JSON array of strings:\n"
-            f'["question 1", "question 2", "question 3"]\n'
-            f"Only return the JSON array, nothing else."
-        )
-
-        response = await llm.ainvoke([HumanMessage(content=suggestion_prompt)])
-
-        if isinstance(response.content, str):
-            suggestion_content = response.content
-        elif isinstance(response.content, list):
-            suggestion_content = "".join(
-                block.get("text", "")
-                for block in response.content
-                if isinstance(block, dict) and block.get("type") == "text"
-            )
-        else:
-            suggestion_content = str(response.content)        
+        # Parse JSON response
 
         try:
-            suggestions = json.loads(suggestion_content)
-            if isinstance(suggestions, list):
-                state.suggested_questions = suggestions[:5]  # Max 5
-            else:
-                state.suggested_questions = []
-        except json.JSONDecodeError:
-            logger.warning("Could not parse suggestions as JSON")
+            content = content.strip()
+
+            # Remove markdown code fences if Gemini return them
+            if content.startswith("```"):
+               lines = content.splitlines()
+
+               # Remove opening ``` or ``` json
+               if lines and lines[0].strip().startswith("```"):
+                   lines = lines[1:]
+
+               # Removing closing ```
+               if lines and lines[-1].strip() == "```":
+                   lines = lines[:-1]
+
+               content = "\n".join(lines).strip()
+
+            # Gemini may return:
+            #
+            # json
+            # {
+            #   "answer": "...",
+            #   "suggested_questions": [...]
+            # }
+            #
+            # Remove the leading "json"
+            if content.lower().startswith("json"):
+                content = content[4:].strip()            
+
+            result = json.loads(content)
+
+            # Extract answer
+            answer = result.get("answer", "")
+
+            # Extract suggestions
+            suggestions = result.get(
+                "suggested_questions",
+                [],
+            )
+
+            # Validate answer
+            if not isinstance(answer, str):
+                answer = str(answer)
+
+            # Validate suggestions
+            if not isinstance(suggestions, list):
+                suggestions = []
+
+            suggestions = [
+                str(question)
+                for question in suggestions[:5]
+                if question
+            ]
+
+            state.answer = answer.strip()
+            state.suggested_questions = suggestions
+
+        except (json.JSONDecodeError, AttributeError, TypeError) as parse_error:
+            # Graceful fallback.
+            # 
+            # If Gemini doesn't return valid JSON, don't fail the
+            # complete chat request.
+            logger.warning(
+                f"Could not parse combined LLM response as JSON: "
+                f"{parse_error}"
+            )
+
+            state.answer = content
             state.suggested_questions = []
 
-        logger.debug(f"Generated {len(state.suggested_questions)} suggestions")
+        logger.debug(
+            f"Generated answer + "
+            f"{len(state.suggested_questions)} suggestions"
+        )
+
         return state
 
     except Exception as e:
-        logger.error(f"Suggest node error: {e}", exc_info=True)
-        state.suggested_questions = []  # Graceful fallback
-        return state
+        logger.error(
+            f"Generate node error: {e}",
+            exc_info=True,
+        )
+
+        state.error = f"Answer generation failed: {str(e)}"
+
+        state.answer = (
+            "I encountered an error while generating a response. "
+            "Please try again."
+        )
+
+        state.suggested_questions = []
+
+        return state 
+                                                             
