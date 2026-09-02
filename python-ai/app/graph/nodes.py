@@ -21,12 +21,21 @@ def get_llm():
     global _llm
 
     if _llm is None:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        _llm = ChatGoogleGenerativeAI(
+        from langchain_nvidia_ai_endpoints import ChatNVIDIA
+        _llm = ChatNVIDIA(
             model=config.LLM_MODEL,
-            api_key=config.GEMINI_API_KEY,
-            thinking_level="low",
+            api_key=config.NVIDIA_API_KEY,
+            temperature=0,
+            max_tokens=1024,
+            model_kwargs={
+                "chat_template_kwargs": {
+                    "enable_thinking": False
+                },
+                "response_format": {
+                   "type": "json_object"
+                }
+            },
+
         )
 
     return _llm

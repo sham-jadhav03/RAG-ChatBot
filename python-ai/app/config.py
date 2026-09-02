@@ -25,9 +25,10 @@ class Config:
     TOP_K_RETRIEVAL = int(os.getenv("TOP_K_RETRIEVAL", "5"))
 
     # Google / Gemini AI configuration
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "nvidia")
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")  # alias used by embedder
-    LLM_MODEL = os.getenv("LLM_MODEL", "gemini-1.5-flash")
+    LLM_MODEL = os.getenv("LLM_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
     EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/embedding-001")
 
     # FastAPI Configuration
@@ -59,8 +60,11 @@ class Config:
         if cls.TOP_K_RETRIEVAL <= 0:
             raise ValueError("TOP_K_RETRIEVAL must be greater than 0")
 
-        if not cls.GEMINI_API_KEY and not cls.GOOGLE_API_KEY:
-            raise ValueError("Missing GEMINI_API_KEY or GOOGLE_API_KEY in .env")
+        if not cls.NVIDIA_API_KEY:
+            raise ValueError("Missing NVIDIA_API_KEY in .env")
+
+        if not cls.GOOGLE_API_KEY:
+            raise ValueError("Missing GOOGLE_API_KEY in .env")
 
         if not 1 <= cls.FASTAPI_PORT <= 65535:
             raise ValueError("FASTAPI_PORT must be between 1 and 65535")
