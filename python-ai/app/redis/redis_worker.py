@@ -326,9 +326,8 @@ class RedisWorker:
                 from datetime import datetime
 
                 # Invoke RAG workflow
-                logger.info("Step 1/3: Retrieving context...")
-                logger.info("Step 2/3: Generating answer...")
-                logger.info("Step 3/3: Generating suggestions...")
+                logger.info("Step 1/2: Retrieving context...")
+                logger.info("Step 2/2: Generating answer + suggestions...")
 
                 final_state = await invoke_rag_graph(
                     question=question,
