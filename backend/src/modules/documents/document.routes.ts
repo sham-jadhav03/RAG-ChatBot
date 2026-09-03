@@ -29,7 +29,7 @@ router.delete(
   documentController.deleteController,
 );
 
-router.get(
+router.post(
   "/:id/reprocess",
   requireAdmin,
   DocumentValidator.validateDocumentId,
