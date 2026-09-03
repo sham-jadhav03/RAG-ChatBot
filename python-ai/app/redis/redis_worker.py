@@ -156,7 +156,12 @@ class RedisWorker:
         file_path = payload.get("filePath")
         file_name = payload.get("fileName")
 
-        logger.info(f"PDF process request: {document_id} - {file_name}")
+        logger.info(
+                    "PDF process request: %s - %s (action=%s)",
+                    document_id,
+                    file_name,
+                    payload.get("action", "PROCESS"),
+        )
 
         try:
             # Import here to avoid circular dependencies

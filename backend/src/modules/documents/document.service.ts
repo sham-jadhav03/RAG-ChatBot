@@ -47,8 +47,6 @@ class documentService {
       folder: "/rag_knowledge_base",
     });
 
-    console.log(typeof (imagekit as any).upload);
-
 
     // 2. Save Document Metadata in MongoDB
     const document = await documentModel.create({
@@ -130,6 +128,7 @@ class documentService {
     await documentModel.findByIdAndDelete(documentId);
 
     const payload = JSON.stringify({
+      type: "process_pdf",
       documentId,
       action: "DELETE",
     });
@@ -153,6 +152,7 @@ class documentService {
 
     //Trigger Redis Event for Python ai worker again
     const payload = JSON.stringify({
+      type: "process_pdf",
       documentId: document._id,
       filePath: document.filePath,
       fileName: document.fileName,
