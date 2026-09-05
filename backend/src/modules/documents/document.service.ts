@@ -1,10 +1,10 @@
 import ImageKit from "@imagekit/nodejs";
 import multer from "multer";
+import { v4 as uuidv4 } from "uuid";
 import documentModel, { IDocument } from "../../models/document.models.js";
 import { config } from "../../config/config.js";
 import { redisPublisher } from "../../redis/publisher.js";
 import { REDIS_CHANNELS } from "../../redis/channels.js";
-
 
 const imagekit = new ImageKit({
   publicKey: config.IMAGEKIT_PUBLIC_KEY,
@@ -17,7 +17,7 @@ const storage = multer.memoryStorage();
 export const uploadMiddleware = multer({
   storage,
   limits: {
-    fileSize: 15 * 1024 * 1024,
+    fileSize: 15 * 1024 * 1024, 
   },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === "application/pdf") {
@@ -29,6 +29,58 @@ export const uploadMiddleware = multer({
 });
 
 class documentService {
+  /**
+   * Publish a PDF processing request to Redis with operation tracking.
+   * Returns true if published successfully, false if no subscribers.
+   * Throws on Redis connection error.
+   */
+  private async publishPdfRequest(
+    documentId: string,
+    operationId: string,
+    action: "PROCESS" | "REPROCESS" | "DELETE",
+    filePath?: string,
+    fileName?: string,
+  ): Promise<boolean> {
+    const payload = JSON.stringify({
+      type: "process_pdf",
+      operationId,
+      documentId,
+      filePath,
+      fileName,
+      action,
+    });
+
+    const subscribers = await redisPublisher.publish(
+      REDIS_CHANNELS.PDF_PROCESS_REQUESTS,
+      payload,
+    );
+
+    console.log(
+      `Published PDF request to ${REDIS_CHANNELS.PDF_PROCESS_REQUESTS}, action: ${action}, operationId: ${operationId}, subscribers: ${subscribers}`,
+    );
+
+    return subscribers > 0;
+  }
+
+  /**
+   * Handle Redis publish failure by marking document as FAILED.
+   */
+  private async handlePublishFailure(
+    documentId: string,
+    operationId: string,
+    action: string,
+    errorMessage: string,
+  ): Promise<void> {
+    await documentModel.findByIdAndUpdate(documentId, {
+      processingStatus: "FAILED",
+      errorMessage: `Publish failed for ${action}: ${errorMessage}`,
+      currentOperationId: operationId,
+    });
+    console.error(
+      `Document ${documentId} marked FAILED due to publish failure: ${errorMessage}`,
+    );
+  }
+
   /**
    * upload PDF to ImageKit, save metadata in Mongo, trigger redis event
    */
@@ -47,41 +99,56 @@ class documentService {
       folder: "/rag_knowledge_base",
     });
 
-
-    // 2. Save Document Metadata in MongoDB
+    // 2. Generate operation ID and save Document Metadata in MongoDB with PENDING status
+    const operationId = uuidv4();
     const document = await documentModel.create({
       fileName: file.originalname,
       filePath: uploadResonse.url,
       fileSize: file.size,
       processingStatus: "PENDING",
       uploadedBy: userId,
+      currentOperationId: operationId,
+      processingVersion: 1,
     });
 
     // 3. Publish Redis Event for Python AI Microservice
-    const payload = JSON.stringify({
-      type: "process_pdf",
-      documentId: document._id,
-      filePath: document.filePath,
-      fileName: document.fileName,
-      action: "PROCESS",
-    });
+    try {
+      const published = await this.publishPdfRequest(
+        document._id.toString(),
+        operationId,
+        "PROCESS",
+        document.filePath,
+        document.fileName,
+      );
 
-    const subscribers = await redisPublisher.publish(
-      REDIS_CHANNELS.PDF_PROCESS_REQUESTS,
-      payload
-    );
-
-    console.log(
-      `Published PDF request to ${REDIS_CHANNELS.PDF_PROCESS_REQUESTS}, subscribers: ${subscribers}`
-    );
-
-    // await redisPublisher.publish(REDIS_CHANNELS.PDF_PROCESS_REQUESTS, payload);
+      if (!published) {
+        await this.handlePublishFailure(
+          document._id.toString(),
+          operationId,
+          "PROCESS",
+          "No Redis subscribers available",
+        );
+        // Re-fetch to return updated status
+        const failedDoc = await documentModel.findById(document._id);
+        if (failedDoc) return failedDoc;
+      }
+    } catch (error: any) {
+      await this.handlePublishFailure(
+        document._id.toString(),
+        operationId,
+        "PROCESS",
+        error.message,
+      );
+      const failedDoc = await documentModel.findById(document._id);
+      if (failedDoc) return failedDoc;
+      throw error;
+    }
 
     return document;
   }
 
   /**
-   * List and Search pdfs eith pagination
+   * List and Search pdfs with pagination
    */
   async getDocuments(query: { search: string; page?: number; limit?: number }) {
     const page = query.page || 1;
@@ -90,7 +157,7 @@ class documentService {
 
     const filter: any = {};
     if (query.search) {
-      filter.fileName = { $regex: query.search, $options: "i" }; // Case-insensitive search
+      filter.fileName = { $regex: query.search, $options: "i" };
     }
 
     const [documents, total] = await Promise.all([
@@ -124,16 +191,26 @@ class documentService {
       throw new Error("Document not found.");
     }
 
-    // delete record from databse
-    await documentModel.findByIdAndDelete(documentId);
+    const operationId = uuidv4();
 
-    const payload = JSON.stringify({
-      type: "process_pdf",
-      documentId,
-      action: "DELETE",
+    // Update document with operation tracking before delete
+    await documentModel.findByIdAndUpdate(documentId, {
+      currentOperationId: operationId,
+      $inc: { processingVersion: 1 },
     });
 
-    await redisPublisher.publish(REDIS_CHANNELS.PDF_PROCESS_REQUESTS, payload);
+    // delete record from database
+    await documentModel.findByIdAndDelete(documentId);
+
+    // Publish DELETE request (best effort - document already deleted)
+    try {
+      await this.publishPdfRequest(documentId, operationId, "DELETE");
+    } catch (error: any) {
+      console.error(
+        `Failed to publish DELETE for document ${documentId}: ${error.message}`,
+      );
+      // Document already deleted, cannot mark FAILED. Log for reconciliation.
+    }
   }
 
   /**
@@ -145,23 +222,49 @@ class documentService {
       throw new Error("Document not found.");
     }
 
-    //Reset status to Pending
-    document.processingStatus = "PENDING";
-    document.errorMessage = undefined;
-    await document.save();
+    const operationId = uuidv4();
+    const newVersion = document.processingVersion + 1;
 
-    //Trigger Redis Event for Python ai worker again
-    const payload = JSON.stringify({
-      type: "process_pdf",
-      documentId: document._id,
-      filePath: document.filePath,
-      fileName: document.fileName,
-      action: "REPROCESS",
+    // Reset status to PENDING with new operation ID and incremented version
+    await documentModel.findByIdAndUpdate(documentId, {
+      processingStatus: "PENDING",
+      errorMessage: undefined,
+      currentOperationId: operationId,
+      processingVersion: newVersion,
     });
 
-    await redisPublisher.publish(REDIS_CHANNELS.PDF_PROCESS_REQUESTS, payload);
+    // Trigger Redis Event for Python ai worker again
+    try {
+      const published = await this.publishPdfRequest(
+        documentId,
+        operationId,
+        "REPROCESS",
+        document.filePath,
+        document.fileName,
+      );
 
-    return document;
+      if (!published) {
+        await this.handlePublishFailure(
+          documentId,
+          operationId,
+          "REPROCESS",
+          "No Redis subscribers available",
+        );
+      }
+    } catch (error: any) {
+      await this.handlePublishFailure(
+        documentId,
+        operationId,
+        "REPROCESS",
+        error.message,
+      );
+    }
+
+    const updatedDoc = await documentModel.findById(documentId);
+    if (!updatedDoc) {
+      throw new Error("Document not found after reprocess update.");
+    }
+    return updatedDoc;
   }
 }
 

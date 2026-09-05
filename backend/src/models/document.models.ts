@@ -20,6 +20,8 @@ export interface IDocument extends MongooseDocument {
   processingStatus: ProcessingStatus;
   errorMessage?: string;
   uploadedBy: mongoose.Types.ObjectId;
+  currentOperationId?: string;
+  processingVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -58,6 +60,14 @@ const documentSchema = new Schema<IDocument>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: [true, "User ID is required."],
+    },
+    currentOperationId: {
+      type: String,
+      default: null,
+    },
+    processingVersion: {
+      type: Number,
+      default: 0,
     },
   },
   {

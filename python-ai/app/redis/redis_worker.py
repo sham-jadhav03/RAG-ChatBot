@@ -147,7 +147,7 @@ class RedisWorker:
 
     async def handle_pdf_process_request(self, payload: Dict[str, Any]):
         """
-            Handle PDF processing request
+            Handle PDF processing request (PROCESS, REPROCESS, DELETE)
             
             Args:
                 payload: Message from pdf_process_requests channel
@@ -155,21 +155,65 @@ class RedisWorker:
         document_id = payload.get("documentId")
         file_path = payload.get("filePath")
         file_name = payload.get("fileName")
+        action = payload.get("action", "PROCESS")
+        operation_id = payload.get("operationId")
 
         logger.info(
-                    "PDF process request: %s - %s (action=%s)",
+                    "PDF process request: %s - %s (action=%s, operationId=%s)",
                     document_id,
                     file_name,
-                    payload.get("action", "PROCESS"),
+                    action,
+                    operation_id,
         )
 
+        # Helper to build response with operationId
+        def build_response(status: str, **kwargs) -> Dict[str, Any]:
+            response = {
+                "type": "process_pdf_response",
+                "documentId": document_id,
+                "status": status,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+            }
+            if operation_id:
+                response["operationId"] = operation_id
+            response.update(kwargs)
+            return response
+
+        from datetime import datetime
+
+        # DELETE action: remove Chroma collection only, no PDF ingestion
+        if action == "DELETE":
+            try:
+                from app.vector.chroma_client import get_vector_store
+                vector_store = get_vector_store(path=config.CHROMA_PATH)
+                
+                logger.info(f"DELETE action: removing Chroma collection for document {document_id}")
+                deleted = await vector_store.delete_collection(document_id)
+                
+                response = build_response(
+                    "COMPLETED" if deleted else "FAILED",
+                    action="DELETE",
+                    errorMessage=None if deleted else "Failed to delete Chroma collection",
+                )
+                await self.publish_response("pdf_process_responses", response)
+                logger.info(f"DELETE response published for {document_id}: {response['status']}")
+            except Exception as e:
+                logger.error(f"Error during DELETE for document {document_id}: {e}", exc_info=True)
+                response = build_response(
+                    "FAILED",
+                    action="DELETE",
+                    errorMessage=f"DELETE error: {str(e)}",
+                )
+                await self.publish_response("pdf_process_responses", response)
+            return
+
+        # PROCESS / REPROCESS actions: full PDF ingestion pipeline
         try:
             # Import here to avoid circular dependencies
             from app.ingestion.pdf_processor import get_processor
             from app.ingestion.embedder import get_embedder
             from app.vector.chroma_client import get_vector_store
             from app.db.mongo_client import get_mongo_client
-            from datetime import datetime
 
             # Get service instances
             pdf_processor = get_processor(
@@ -177,7 +221,7 @@ class RedisWorker:
                 chunk_overlap=config.CHUNK_OVERLAP,
             )
             embedder = get_embedder()
-            vectore_store = get_vector_store(path=config.CHROMA_PATH)
+            vector_store = get_vector_store(path=config.CHROMA_PATH)
             mongo_client = get_mongo_client()
 
             # Step 0: Set MongoDB status to PROCESSING
@@ -200,7 +244,7 @@ class RedisWorker:
 
              # Step 3: Store in Chroma
             logger.info("Step 3/4: Storing in vector database...")
-            storage_result = await vectore_store.store_embeddings(
+            storage_result = await vector_store.store_embeddings(
                 document_id=document_id,
                 chunks=chunks,
                 embeddings=embeddings
@@ -215,16 +259,13 @@ class RedisWorker:
             )
 
             # Send success response
-            response = {
-                "type": "process_pdf_response",
-                "documentId": document_id,
-                "status": "COMPLETED",
-                "chunksCreated": len(chunks),
-                "embeddingsGenerated": len(embeddings),
-                "totalTokens": token_count,
-                "errorMessage": None,
-                "timestamp": datetime.utcnow().isoformat() + "Z",  
-            }
+            response = build_response(
+                "COMPLETED",
+                chunksCreated=len(chunks),
+                embeddingsGenerated=len(embeddings),
+                totalTokens=token_count,
+                errorMessage=None,
+            )
 
             await self.publish_response("pdf_process_responses", response)
             logger.info(f"PDF response published for {document_id}")
@@ -235,21 +276,18 @@ class RedisWorker:
 
             # update Mongo with error
             from app.db.mongo_client import get_mongo_client
-            from datetime import datetime
             mongo_client = get_mongo_client()
             await mongo_client.mark_processing_failed(document_id, error_msg)
 
             # Send error response
-            await self.publish_response("pdf_process_responses", {
-                "type": "process_pdf_response",
-                "documentId": document_id,
-                "status": "FAILED",
-                "chunksCreated": 0,
-                "embeddingsGenerated": 0,
-                "totalTokens": 0,
-                "errorMessage": error_msg,
-                "timestamp": datetime.utcnow().isoformat() + "Z"
-            })
+            response = build_response(
+                "FAILED",
+                chunksCreated=0,
+                embeddingsGenerated=0,
+                totalTokens=0,
+                errorMessage=error_msg,
+            )
+            await self.publish_response("pdf_process_responses", response)
 
         except ValueError as e:
             logger.error(f"Validation error: {e}")
@@ -257,21 +295,18 @@ class RedisWorker:
             
             # Update MongoDB
             from app.db.mongo_client import get_mongo_client
-            from datetime import datetime
             mongo_client = get_mongo_client()
             await mongo_client.mark_processing_failed(document_id, error_msg)
             
             # Send error response
-            await self.publish_response("pdf_process_responses", {
-                "type": "process_pdf_response",
-                "documentId": document_id,
-                "status": "FAILED",
-                "chunksCreated": 0,
-                "embeddingsGenerated": 0,
-                "totalTokens": 0,
-                "errorMessage": error_msg,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-            })
+            response = build_response(
+                "FAILED",
+                chunksCreated=0,
+                embeddingsGenerated=0,
+                totalTokens=0,
+                errorMessage=error_msg,
+            )
+            await self.publish_response("pdf_process_responses", response)
             
         except Exception as e:
             logger.error(f"Unexpected error processing PDF: {e}", exc_info=True)
@@ -286,17 +321,14 @@ class RedisWorker:
                 logger.warning("Could not update MongoDB with error")
             
             # Send error response
-            from datetime import datetime
-            await self.publish_response("pdf_process_responses", {
-                "type": "process_pdf_response",
-                "documentId": document_id,
-                "status": "FAILED",
-                "chunksCreated": 0,
-                "embeddingsGenerated": 0,
-                "totalTokens": 0,
-                "errorMessage": error_msg,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-            })
+            response = build_response(
+                "FAILED",
+                chunksCreated=0,
+                embeddingsGenerated=0,
+                totalTokens=0,
+                errorMessage=error_msg,
+            )
+            await self.publish_response("pdf_process_responses", response)
 
     async def handle_chat_request(self, payload: Dict[str, Any]):
         """
