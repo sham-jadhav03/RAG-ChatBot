@@ -98,33 +98,63 @@ class RedisWorker:
         self.publisher = None
 
     async def cleanup(self):
-        """Close Redis connections and cancel in-flight tasks (used for graceful shutdown)"""
+        """Close Redis connections and gracefully drain in-flight tasks (used for graceful shutdown)"""
         try:
+            logger.info(f"Starting graceful shutdown: {len(self._active_tasks)} active tasks")
+            
             if self._active_tasks:
+                # Cancel all active tasks
                 for task in list(self._active_tasks):
                     task.cancel()
-                await asyncio.gather(*self._active_tasks, return_exceptions=True)
-                self._active_tasks.clear()
+                
+                # Wait for tasks to complete with bounded timeout (25s to leave margin for 30s outer timeout)
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*self._active_tasks, return_exceptions=True),
+                        timeout=25.0
+                    )
+                    logger.info("All active tasks completed during graceful shutdown")
+                except asyncio.TimeoutError:
+                    logger.warning(f"Graceful drain timed out, {len(self._active_tasks)} tasks still running")
+                finally:
+                    self._active_tasks.clear()
 
+            # Close Redis connections
             if self.pubsub:
-                await self.pubsub.unsubscribe()
-                await self.pubsub.close()
+                try:
+                    await self.pubsub.unsubscribe()
+                except Exception:
+                    pass
+                try:
+                    await self.pubsub.close()
+                except Exception:
+                    pass
                 logger.info("PubSub closed")
 
             if self.redis_client:
-                await self.redis_client.close()
+                try:
+                    await self.redis_client.close()
+                except Exception:
+                    pass
                 logger.info("Redis client closed")
 
             if self.publisher:
-                await self.publisher.close()
+                try:
+                    await self.publisher.close()
+                except Exception:
+                    pass
                 logger.info("Redis publisher closed")
 
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
+            logger.error(f"Error during cleanup: {e}", exc_info=True)
 
-    # ------------------------------------------------------------------
-    # Publishing
-    # ------------------------------------------------------------------
+    def get_active_task_count(self) -> int:
+        """Return number of currently active background tasks"""
+        return len(self._active_tasks)
+
+# ------------------------------------------------------------------
+# Publishing
+# ------------------------------------------------------------------
 
     async def publish_response(self, channel: str, message: Dict[str, Any]):
         """
@@ -535,6 +565,12 @@ class RedisWorker:
 
 # Global worker instance
 _worker = None
+
+
+def get_worker_instance() -> "RedisWorker":
+    """Get the global worker instance for external cleanup access"""
+    global _worker
+    return _worker
 
 
 async def listen_to_redis():

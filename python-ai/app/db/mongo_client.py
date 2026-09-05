@@ -174,13 +174,22 @@ class MongoDBClient:
             logger.error(f"Error getting document: {e}")
             return None
 
-    def close(self):
+    async def close(self):
         """Close MongoDB connection"""
         try:
-            self.client.close()
+            # pymongo's close is synchronous, run in thread to avoid blocking
+            await asyncio.to_thread(self.client.close)
             logger.info("MongoDB connection closed")
         except Exception as e:
             logger.warning(f"Error closing MongoDB: {e}")
+
+
+async def close_mongo_client():
+    """Close the global MongoDB client"""
+    global _mongo_client
+    if _mongo_client is not None:
+        await _mongo_client.close()
+        _mongo_client = None
 
 
 # Global instance
