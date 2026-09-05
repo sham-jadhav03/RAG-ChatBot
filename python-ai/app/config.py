@@ -39,6 +39,10 @@ class Config:
     # Logger configuration
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
+    # Timeout configuration (seconds)
+    EMBEDDING_TIMEOUT = int(os.getenv("EMBEDDING_TIMEOUT", "10"))
+    LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "20"))
+
     @classmethod
     def validate(cls):
         """Validate critical configuration"""
@@ -68,6 +72,12 @@ class Config:
 
         if not 1 <= cls.FASTAPI_PORT <= 65535:
             raise ValueError("FASTAPI_PORT must be between 1 and 65535")
+
+        if cls.EMBEDDING_TIMEOUT <= 0:
+            raise ValueError("EMBEDDING_TIMEOUT must be greater than 0")
+
+        if cls.LLM_TIMEOUT <= 0:
+            raise ValueError("LLM_TIMEOUT must be greater than 0")
 
 
 # Validate on import

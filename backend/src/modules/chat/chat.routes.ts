@@ -16,6 +16,11 @@ router.post(
 );
 
 router.get(
+  "/conversations",
+  chatController.listConversationsController,
+);
+
+router.get(
   "/:sessionId/history",
   chatValidator.validateHistoryQuery,
   chatController.getHistoryController,

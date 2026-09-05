@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class EmbeddingGenerator:
     """Generate embeddings for document chunks"""
- 
+  
     def __init__(self, model: str = None):
         """
         Initialize embedding generator
@@ -105,21 +105,28 @@ class EmbeddingGenerator:
             logger.debug(f"🔍 Embedding query: {query[:50]}...")
 
             # embed_query is synchronous — run in a thread to avoid blocking the event loop
-            embedding = await asyncio.to_thread(self.embeddings.embed_query, query)
+            # with timeout to prevent hanging on external API
+            embedding = await asyncio.wait_for(
+                asyncio.to_thread(self.embeddings.embed_query, query),
+                timeout=config.EMBEDDING_TIMEOUT,
+            )
 
             logger.debug(f"✅ Query embedded (dimension: {len(embedding)})")
 
             return embedding
 
+        except asyncio.TimeoutError:
+            logger.error(f"❌ Embedding query timed out after {config.EMBEDDING_TIMEOUT}s")
+            raise ValueError(f"Embedding query timed out after {config.EMBEDDING_TIMEOUT}s")
         except Exception as e:
             logger.error(f"❌ Error embedding query: {e}", exc_info=True)
             raise ValueError(f"Query embedding failed: {str(e)}")
- 
- 
+  
+  
 # Global instance
 _embedder = None
- 
- 
+  
+  
 def get_embedder(model: str = None) -> EmbeddingGenerator:
     """Get or create global EmbeddingGenerator instance"""
     global _embedder

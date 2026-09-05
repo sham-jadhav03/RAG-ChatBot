@@ -20,6 +20,7 @@ export function useChat({
   const [messages, setMessages] = useState<ChatHistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [pendingQuestionStartTime, setPendingQuestionStartTime] = useState<number | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const queryClient = useQueryClient();
 
@@ -42,8 +43,11 @@ export function useChat({
         question: trimmedQuestion,
       };
 
+      const startTime = Date.now();
+
       setIsLoading(true);
       setPendingQuestion(trimmedQuestion);
+      setPendingQuestionStartTime(startTime);
       setError(null);
 
       try {
@@ -77,6 +81,7 @@ export function useChat({
       } finally {
         setIsLoading(false);
         setPendingQuestion(null);
+        setPendingQuestionStartTime(null);
       }
     },
     [sessionId, documentId, isLoading, queryClient],
@@ -86,6 +91,7 @@ export function useChat({
     setMessages(initialMessages);
     setError(null);
     setPendingQuestion(null);
+    setPendingQuestionStartTime(null);
   }, []);
 
   const dismissError = useCallback(() => {
@@ -96,6 +102,7 @@ export function useChat({
     messages,
     isLoading,
     pendingQuestion,
+    pendingQuestionStartTime,
     error,
     sendMessage,
     resetMessages,

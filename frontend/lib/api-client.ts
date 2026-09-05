@@ -10,6 +10,7 @@ import type {
   AskQuestionRequestData,
   LoginRequest,
   RegisterRequest,
+  ConversationListData,
 } from "@/lib/types";
 
 const API_BASE_URL =
@@ -234,6 +235,20 @@ export const chatapi = {
 
     return request<ChatHistoryData>(
       `/api/chat/${encodeURIComponent(sessionId)}/history?${searchParams.toString()}`,
+    );
+  },
+
+  async listConversations(
+    page: number,
+    limit: number,
+  ): Promise<ConversationListData> {
+    const searchParams = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+    });
+
+    return request<ConversationListData>(
+      `/api/chat/conversations?${searchParams.toString()}`,
     );
   },
 };

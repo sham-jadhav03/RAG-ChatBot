@@ -15,6 +15,7 @@ export interface IChatSource {
 export interface IChatMessage extends MongooseDocument {
   sessionId: string;
   documentId: Types.ObjectId;
+  userId: Types.ObjectId;
   question: string;
   answer: string;
   sources: IChatSource[];
@@ -44,7 +45,7 @@ const chatSourceSchema = new Schema<IChatSource>(
       required: [true, "Similarity score is required."],
     },
   },
-  { _id: false }, //Sub-document doesn't need its own _id
+  { _id: false },
 );
 
 const chatMessageSchema = new Schema<IChatMessage>(
@@ -58,6 +59,11 @@ const chatMessageSchema = new Schema<IChatMessage>(
       type: Schema.Types.ObjectId,
       ref: "Document",
       required: [true, "Document Id is required."],
+    },
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: [true, "User Id is required."],
     },
     question: {
       type: String,
@@ -86,6 +92,7 @@ const chatMessageSchema = new Schema<IChatMessage>(
 );
 
 chatMessageSchema.index({ sessionId: 1, createdAt: -1 });
+chatMessageSchema.index({ userId: 1, createdAt: -1 });
 
 const chatMessageModel: Model<IChatMessage> = mongoose.model<IChatMessage>(
   "ChatMessage",

@@ -206,9 +206,18 @@ async def generate_node(state: ChatState) -> ChatState:
                     AIMessage(content=content)
                 )
 
-        # ONE Gemini call
-
-        response = await llm.ainvoke(formatted_messages)
+        # ONE LLM call with timeout
+        try:
+            response = await asyncio.wait_for(
+                llm.ainvoke(formatted_messages),
+                timeout=config.LLM_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"LLM call timed out after {config.LLM_TIMEOUT}s")
+            state.error = f"LLM call timed out after {config.LLM_TIMEOUT}s"
+            state.answer = "The AI service is taking too long to respond. Please try again."
+            state.suggested_questions = []
+            return state
 
         # Normalize Gemini response content
         raw_content = response.content

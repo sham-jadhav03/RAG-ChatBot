@@ -20,3 +20,21 @@ redisPublisher.on("connect", () => {
 redisPublisher.on("error", (err) => {
   console.error("Redis Publisher Error:", err.message);
 });
+
+/**
+ * Add a message to a Redis Stream.
+ * Returns the stream message ID on success.
+ * Throws on Redis connection error.
+ */
+export async function xadd(
+  stream: string,
+  payload: Record<string, string>,
+): Promise<string> {
+  const args: string[] = [];
+  for (const [key, value] of Object.entries(payload)) {
+    args.push(key, value);
+  }
+  const messageId = await redisPublisher.xadd(stream, "*", ...args);
+  console.log(`XADD to ${stream}: ${messageId}`);
+  return messageId!;
+}

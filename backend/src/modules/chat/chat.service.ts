@@ -5,12 +5,13 @@ import chatMessageModel, {
   IChatMessage,
   IChatSource,
 } from "../../models/chat.model.js";
-import { redisPublisher } from "../../redis/publisher.js";
-import { REDIS_CHANNELS } from "../../redis/channels.js";
+import { xadd } from "../../redis/publisher.js";
+import { REDIS_CHANNELS, REDIS_STREAMS } from "../../redis/channels.js";
 import {
   pendingRequests,
   SourceDocument,
 } from "../../redis/pendingRequests.js";
+import { PipelineStage } from "mongoose";
 
 const CONVERSATION_HISTORY_LIMIT = 5;
 const CHAT_REQUEST_TIMEOUT_MS = 30000;
@@ -19,10 +20,18 @@ export interface AskQuestionInput {
   sessionId: string;
   documentId: string;
   question: string;
+  userId: string;
 }
 
 export interface GetHistoryInput {
   sessionId: string;
+  userId: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface ListConversationsInput {
+  userId: string;
   page?: number;
   limit?: number;
 }
@@ -149,7 +158,7 @@ class chatService {
    * Node communicates with Python exclusively through Redis Pub/Sub.
    */
   public async askQuestion(input: AskQuestionInput): Promise<IChatMessage> {
-    const { sessionId, documentId, question } = input;
+    const { sessionId, documentId, question, userId } = input;
 
     // 1. Verify document exists and is ready.
     const document = await this.verifyDocumentReady(documentId);
@@ -173,21 +182,16 @@ class chatService {
       CHAT_REQUEST_TIMEOUT_MS,
     );
 
-    const requestPayload = {
-      type: "ask_question",
-      requestId,
-      sessionId,
-      documentId,
-      question,
-      conversationHistory,
-    };
-
-    // 6. Publish request to Python through Redis.
+    // 6. Publish request to Python through Redis Stream.
     try {
-      await redisPublisher.publish(
-        REDIS_CHANNELS.PDF_CHAT_REQUESTS,
-        JSON.stringify(requestPayload),
-      );
+      await xadd(REDIS_STREAMS.PDF_CHAT_REQUESTS, {
+        type: "ask_question",
+        requestId,
+        sessionId,
+        documentId,
+        question,
+        conversationHistory: JSON.stringify(conversationHistory),
+      });
     } catch (publishError) {
       pendingRequests.reject(requestId, publishError as Error);
 
@@ -238,10 +242,11 @@ class chatService {
       throw error;
     }
 
-    // 11. Persist only successful Q&A exchanges.
+    // 11. Persist only successful Q&A exchanges with userId for ownership.
     const savedMessage = await chatMessageModel.create({
       sessionId,
       documentId,
+      userId,
       question,
       answer: response.answer,
       sources: normalizedSources,
@@ -266,6 +271,7 @@ class chatService {
 
     const filter = {
       sessionId: input.sessionId,
+      userId: input.userId,
     };
 
     const [messages, total] = await Promise.all([
@@ -280,6 +286,55 @@ class chatService {
 
     return {
       messages,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * List all conversations for a user.
+   * Returns distinct sessions with last message preview.
+   */
+  public async listConversations(input: ListConversationsInput) {
+    const page = input.page || 1;
+    const limit = input.limit || 20;
+    const skip = (page - 1) * limit;
+
+    // Get distinct sessions for user with last message
+    const pipeline: PipelineStage[] = [
+      { $match: { userId: input.userId } },
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: "$sessionId",
+          documentId: { $first: "$documentId" },
+          lastMessage: { $first: "$$ROOT" },
+          messageCount: { $sum: 1 },
+        },
+      },
+      { $sort: { "lastMessage.createdAt": -1 } },
+      { $skip: skip },
+      { $limit: limit },
+    ];
+
+    const [conversations, total] = await Promise.all([
+      chatMessageModel.aggregate(pipeline),
+      chatMessageModel.distinct("sessionId", { userId: input.userId }).then((ids) => ids.length),
+    ]);
+
+    return {
+      conversations: conversations.map((c) => ({
+        sessionId: c._id,
+        documentId: c.documentId,
+        lastQuestion: c.lastMessage.question,
+        lastAnswer: c.lastMessage.answer,
+        lastMessageAt: c.lastMessage.createdAt,
+        messageCount: c.messageCount,
+      })),
       pagination: {
         total,
         page,

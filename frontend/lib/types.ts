@@ -132,3 +132,22 @@ export interface ChatHistoryData {
     totalPages: number;
   };
 }
+
+export interface ConversationEntry {
+  sessionId: string;
+  documentId: string;
+  lastQuestion: string;
+  lastAnswer: string;
+  lastMessageAt: string;
+  messageCount: number;
+}
+
+export interface ConversationListData {
+  conversations: ConversationEntry[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}

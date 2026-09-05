@@ -8,6 +8,7 @@ import type { ChatHistoryEntry } from "@/lib/types";
 interface ChatHistoryProps {
   messages: ChatHistoryEntry[];
   pendingQuestion?: string | null;
+  pendingQuestionStartTime?: number | null;
   isLoading?: boolean;
   onSelectQuestion?: (question: string) => void;
 }
@@ -15,6 +16,7 @@ interface ChatHistoryProps {
 export function ChatHistory({
   messages,
   pendingQuestion,
+  pendingQuestionStartTime,
   isLoading,
   onSelectQuestion,
 }: ChatHistoryProps) {
@@ -59,7 +61,7 @@ export function ChatHistory({
       {pendingQuestion && (
         <div className="space-y-3">
           <MessageBubble role="user" content={pendingQuestion} />
-          {isLoading && <TypingIndicator />}
+          {isLoading && <TypingIndicator startTime={pendingQuestionStartTime ?? undefined} />}
         </div>
       )}
     </div>
