@@ -28,23 +28,58 @@ redisSubscriber.on("connect", () => {
 
 /**
  * Message listener for background tasks
- *
  */
-
 redisSubscriber.on("message", async (channel, message) => {
   try {
     const payload = JSON.parse(message);
 
     // 1. Python PDF processing completed Response Listener
     if (channel === REDIS_CHANNELS.PDF_PROCESS_RESPONSES) {
-      const { documentId, status, errorMessage } = payload;
+      const { documentId, status, errorMessage, operationId } = payload;
 
       if (documentId) {
-        await documentModel.findByIdAndUpdate(documentId, {
-          processingStatus: status, // "COMPLETED" or "FAILED"
-          errorMessage: errorMessage || null,
-        });
-        console.log(`Document ${documentId} status updated to: ${status}`);
+        const document = await documentModel
+          .findById(documentId)
+          .select("currentOperationId processingVersion processingStatus");
+
+        if (!document) {
+          console.warn(
+            `Received response for non-existent document: ${documentId}`,
+          );
+        } else if (operationId) {
+          // New Python worker sends operationId - validate it matches current operation
+          if (document.currentOperationId !== operationId) {
+            console.warn(
+              `Ignoring stale response for document ${documentId}: ` +
+                `response operationId=${operationId}, current=${document.currentOperationId}, ` +
+                `version=${document.processingVersion}, status=${document.processingStatus}`,
+            );
+          } else {
+            await documentModel.findByIdAndUpdate(documentId, {
+              processingStatus: status,
+              errorMessage: errorMessage || null,
+              currentOperationId: null,
+            });
+            console.log(
+              `Document ${documentId} status updated to: ${status} (operationId: ${operationId})`,
+            );
+          }
+        } else {
+          // Backward compatibility: old Python worker doesn't send operationId
+          // Apply response but log warning
+          console.warn(
+            `Applying response without operationId for document ${documentId} ` +
+              `(legacy Python worker). Current version: ${document.processingVersion}`,
+          );
+          await documentModel.findByIdAndUpdate(documentId, {
+            processingStatus: status,
+            errorMessage: errorMessage || null,
+            currentOperationId: null,
+          });
+          console.log(
+            `Document ${documentId} status updated to: ${status} (legacy)`,
+          );
+        }
       }
     }
 
@@ -66,4 +101,3 @@ redisSubscriber.on("message", async (channel, message) => {
     console.error("Error handling Redis message:", error.message);
   }
 });
-
