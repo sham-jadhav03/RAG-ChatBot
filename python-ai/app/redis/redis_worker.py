@@ -3,7 +3,7 @@ import json
 import logging
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutError as RedisTimeoutError
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from app.config import config
 
@@ -19,14 +19,19 @@ _REDIS_SOCKET_TIMEOUT = 30.0         # read timeout (seconds)
 _REDIS_SOCKET_CONNECT_TIMEOUT = 10.0 # connect timeout (seconds)
 _REDIS_HEALTH_CHECK_INTERVAL = 15    # keepalive ping interval (seconds)
 
+# Stream configuration
+CHAT_STREAM_KEY = "pdf_chat_requests"
+CHAT_CONSUMER_GROUP = "chat-workers"
+CHAT_CONSUMER_PREFIX = "worker-"
+
 
 class RedisWorker:
-    """Manages Redis Pub/Sub connection and message routing with auto-reconnect"""
+    """Manages Redis Pub/Sub and Streams connections with auto-reconnect"""
 
     # Canonical channel names — must match Node.js channels.ts
     SUBSCRIBE_CHANNELS = [
         "pdf_process_requests",
-        "pdf_chat_requests",
+        # "pdf_chat_requests" - now consumed via Redis Streams
     ]
 
     def __init__(self):
@@ -34,6 +39,7 @@ class RedisWorker:
         self.pubsub = None
         self.publisher = None
         self._active_tasks = set()
+        self._chat_stream_consumer_name = f"{CHAT_CONSUMER_PREFIX}{asyncio.current_task().get_name() if asyncio.current_task() else 'main'}"
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -69,8 +75,25 @@ class RedisWorker:
             logger.exception(f"Failed to connect to Redis: {e}")
             raise
 
+    async def _ensure_chat_consumer_group(self):
+        """Create the chat stream consumer group if it doesn't exist."""
+        try:
+            await self.redis_client.xgroup_create(
+                CHAT_STREAM_KEY,
+                CHAT_CONSUMER_GROUP,
+                id="0",  # Start from beginning of stream
+                mkstream=True,  # Create stream if it doesn't exist
+            )
+            logger.info(f"Created consumer group '{CHAT_CONSUMER_GROUP}' for stream '{CHAT_STREAM_KEY}'")
+        except redis.ResponseError as e:
+            if "BUSYGROUP" in str(e):
+                logger.info(f"Consumer group '{CHAT_CONSUMER_GROUP}' already exists")
+            else:
+                logger.error(f"Failed to create consumer group: {e}")
+                raise
+
     async def subscribe_to_channels(self):
-        """Subscribe to all required channels"""
+        """Subscribe to all required Pub/Sub channels"""
         try:
             self.pubsub = self.redis_client.pubsub()
             await self.pubsub.subscribe(*self.SUBSCRIBE_CHANNELS)
@@ -78,6 +101,9 @@ class RedisWorker:
         except Exception as e:
             logger.error(f"Failed to subscribe to channels: {e}")
             raise
+
+        # Ensure chat consumer group exists for stream processing
+        await self._ensure_chat_consumer_group()
 
     async def _close_silently(self):
         """
@@ -152,9 +178,9 @@ class RedisWorker:
         """Return number of currently active background tasks"""
         return len(self._active_tasks)
 
-# ------------------------------------------------------------------
-# Publishing
-# ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Publishing
+    # ------------------------------------------------------------------
 
     async def publish_response(self, channel: str, message: Dict[str, Any]):
         """
@@ -364,7 +390,7 @@ class RedisWorker:
         """
         Handle chat/RAG request
         Args:
-            payload: Message from pdf_chat_requests channel
+            payload: Message from pdf_chat_requests stream
         """
         request_id = None
         session_id = None
@@ -377,7 +403,12 @@ class RedisWorker:
             session_id = payload.get("sessionId")
             document_id = payload.get("documentId") or ""
             question = payload.get("question")
-            conversation_history = payload.get("conversationHistory", [])
+            raw_history = payload.get("conversationHistory", "[]")
+            try:
+                conversation_history = json.loads(raw_history) if isinstance(raw_history, str) else raw_history
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse conversationHistory: {raw_history}, defaulting to empty list")
+                conversation_history = []
             
             logger.info(
                 f"Chat Request: {request_id[:8] if request_id else 'none'}... - "
@@ -447,7 +478,7 @@ class RedisWorker:
                 "error": str(e),
                 "timestamp": datetime.utcnow().isoformat() + "Z",
             })
- 
+  
     def _dispatch_message(self, channel: str, payload: Dict[str, Any]):
         """
         Dispatch message processing to a concurrent background task.
@@ -490,6 +521,53 @@ class RedisWorker:
                 f"Unknown message type '{message_type}' on channel '{channel}'"
             )
 
+    async def _process_chat_stream_messages(self):
+        """
+        Process messages from the chat stream using XREADGROUP.
+        This runs as a background task alongside the Pub/Sub listener.
+        """
+        logger.info(f"Starting chat stream consumer: {self._chat_stream_consumer_name}")
+        
+        while True:
+            try:
+                # Read from stream with consumer group
+                # block=5000ms to allow periodic check for shutdown
+                messages = await self.redis_client.xreadgroup(
+                    groupname=CHAT_CONSUMER_GROUP,
+                    consumername=self._chat_stream_consumer_name,
+                    streams={CHAT_STREAM_KEY: ">"},
+                    count=10,
+                    block=5000,
+                )
+                
+                if not messages:
+                    continue
+                
+                for stream_name, stream_messages in messages:
+                    for message_id, message_data in stream_messages:
+                        try:
+                            # message_data is already decoded dict from decode_responses=True
+                            message_type = message_data.get("type")
+                            
+                            if message_type == "ask_question":
+                                await self.route_message("pdf_chat_requests", message_data)
+                            
+                            # ACK the message after successful processing
+                            await self.redis_client.xack(CHAT_STREAM_KEY, CHAT_CONSUMER_GROUP, message_id)
+                            
+                        except Exception as e:
+                            logger.error(f"Error processing chat stream message {message_id}: {e}", exc_info=True)
+                            # Don't ACK on error - message will be redelivered
+                            # Optionally: implement dead letter queue after max retries
+                            
+            except asyncio.CancelledError:
+                logger.info("Chat stream consumer cancelled")
+                raise
+            except Exception as e:
+                logger.error(f"Error in chat stream consumer: {e}", exc_info=True)
+                # Brief pause before retry
+                await asyncio.sleep(1)
+
     # ------------------------------------------------------------------
     # Main listener with reconnect
     # ------------------------------------------------------------------
@@ -497,26 +575,35 @@ class RedisWorker:
     async def listen_forever(self):
         """
         Main listener loop with automatic reconnection.
-
+        
         On Redis connection loss the worker:
         1. Closes all broken connections silently.
         2. Waits with bounded exponential backoff (1 s → 60 s).
         3. Re-creates Redis client, publisher, and Pub/Sub subscription.
-        4. Resumes listening.
+        4. Re-creates stream consumer and resumes XREADGROUP.
+        5. Resumes listening.
 
         The loop exits only on asyncio.CancelledError (graceful shutdown).
         """
         backoff = _INITIAL_BACKOFF_S
+        
+        # Track background tasks for both listeners
+        chat_stream_task = None
 
         while True:
             try:
                 # --- (Re)connect ---
                 await self.connect()
                 await self.subscribe_to_channels()
-                logger.info("🎧 Redis worker listening for messages...")
+                logger.info("🎧 Redis worker listening for messages (Pub/Sub + Streams)...")
                 backoff = _INITIAL_BACKOFF_S  # reset after successful connect
 
-                # --- Listen ---
+                # Start chat stream consumer as background task
+                chat_stream_task = asyncio.create_task(self._process_chat_stream_messages())
+                self._active_tasks.add(chat_stream_task)
+                chat_stream_task.add_done_callback(self._active_tasks.discard)
+
+                # --- Listen on Pub/Sub for pdf_process_requests ---
                 async for message in self.pubsub.listen():
                     # Skip subscription confirmation messages
                     if message["type"] == "subscribe":
@@ -542,12 +629,26 @@ class RedisWorker:
 
             except asyncio.CancelledError:
                 logger.info("Redis worker listener cancelled — shutting down")
+                # Cancel chat stream task
+                if chat_stream_task and not chat_stream_task.done():
+                    chat_stream_task.cancel()
+                    try:
+                        await chat_stream_task
+                    except asyncio.CancelledError:
+                        pass
                 await self.cleanup()
                 return
 
             except (RedisConnectionError, RedisTimeoutError, ConnectionError, OSError) as e:
                 # --- Transient connection failure: reconnect ---
                 logger.warning(f"Redis connection lost: {e}")
+                # Cancel chat stream task
+                if chat_stream_task and not chat_stream_task.done():
+                    chat_stream_task.cancel()
+                    try:
+                        await chat_stream_task
+                    except asyncio.CancelledError:
+                        pass
                 await self._close_silently()
                 logger.info(f"Reconnecting in {backoff:.1f}s …")
                 await asyncio.sleep(backoff)
@@ -557,6 +658,13 @@ class RedisWorker:
                 # Unexpected error — still attempt reconnect rather than die,
                 # but log the full traceback so it can be investigated.
                 logger.error(f"Unexpected Redis listener error: {e}", exc_info=True)
+                # Cancel chat stream task
+                if chat_stream_task and not chat_stream_task.done():
+                    chat_stream_task.cancel()
+                    try:
+                        await chat_stream_task
+                    except asyncio.CancelledError:
+                        pass
                 await self._close_silently()
                 logger.info(f"Reconnecting in {backoff:.1f}s …")
                 await asyncio.sleep(backoff)
