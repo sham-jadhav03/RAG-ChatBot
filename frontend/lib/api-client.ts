@@ -12,6 +12,7 @@ import type {
   RegisterRequest,
   ConversationListData,
 } from "@/lib/types";
+import { getAccessToken, setAccessToken } from "@/lib/auth";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
@@ -78,6 +79,43 @@ export class TimeoutError extends ApiError {
   }
 }
 
+let isRefreshing = false;
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (isRefreshing) {
+    return refreshPromise!;
+  }
+
+  isRefreshing = true;
+  refreshPromise = (async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+        method: "POST",
+        credentials: "include", // Include HttpOnly cookie
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const body = await response.json();
+      if (body.success && body.data?.accessToken) {
+        setAccessToken(body.data.accessToken);
+        return body.data.accessToken;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      isRefreshing = false;
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
 
@@ -85,17 +123,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
 
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
-
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
+  // Use in-memory access token
+  const accessToken = getAccessToken();
+  if (accessToken) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
   }
 
+  // Always include credentials for HttpOnly cookie (refresh token)
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
+    credentials: "include",
   });
 
   let body: ApiSuccessBody<T> | ApiErrorBody | undefined;
@@ -109,6 +147,40 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     );
   }
 
+  // Handle 401 - try to refresh access token
+  if (response.status === 401) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      // Retry the original request with new token
+      headers.set("Authorization", `Bearer ${newToken}`);
+      const retryResponse = await fetch(`${API_BASE_URL}${path}`, {
+        ...options,
+        headers,
+        credentials: "include",
+      });
+      
+      let retryBody: ApiSuccessBody<T> | ApiErrorBody | undefined;
+      try {
+        retryBody = await retryResponse.json();
+      } catch {
+        throw new ApiError(
+          `Backend returned an invalid response (${retryResponse.status})`,
+          retryResponse.status,
+        );
+      }
+
+      if (!retryResponse.ok || !retryBody || retryBody.success === false) {
+        const errorBody = retryBody as ApiErrorBody | undefined;
+        const message = errorBody?.message || "Request failed after refresh";
+        throw new UnauthorizedError(message, errorBody);
+      }
+
+      return retryBody.data as T;
+    }
+    // Refresh failed, throw unauthorized
+    throw new UnauthorizedError("Session expired. Please log in again.");
+  }
+
   if (!response.ok || !body || body.success === false) {
     const errorBody = body as ApiErrorBody | undefined;
     const message = errorBody?.message || "Request failed";
@@ -116,9 +188,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     switch (response.status) {
       case 400:
         throw new BadRequestError(message, errorBody);
-
-      case 401:
-        throw new UnauthorizedError(message, errorBody);
 
       case 404:
         throw new NotFoundError(message, errorBody);
@@ -143,29 +212,71 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return body.data as T;
 }
 
-// ============================================================
-// Authentication API
-// ============================================================
-
 export const authApi = {
   async login(payload: LoginRequest): Promise<AuthResponseData> {
-    return request<AuthResponseData>("/api/auth/login", {
+    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      credentials: "include",
     });
+
+    const body = await response.json();
+    
+    if (!response.ok || !body.success) {
+      throw new UnauthorizedError(body.message || "Login failed");
+    }
+
+    // Store access token in memory
+    if (body.data?.accessToken) {
+      setAccessToken(body.data.accessToken);
+    }
+
+    return body.data as AuthResponseData;
   },
 
   async register(payload: RegisterRequest): Promise<AuthResponseData> {
-    return request<AuthResponseData>("/api/auth/register", {
+    const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      credentials: "include",
     });
+
+    const body = await response.json();
+    
+    if (!response.ok || !body.success) {
+      throw new BadRequestError(body.message || "Registration failed");
+    }
+
+    // Store access token in memory
+    if (body.data?.accessToken) {
+      setAccessToken(body.data.accessToken);
+    }
+
+    return body.data as AuthResponseData;
+  },
+
+  async refresh(): Promise<{ accessToken: string; user: AuthResponseData["user"] } | null> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const body = await response.json();
+      
+      if (!response.ok || !body.success || !body.data?.accessToken) {
+        return null;
+      }
+
+      setAccessToken(body.data.accessToken);
+      return { accessToken: body.data.accessToken, user: body.data.user };
+    } catch {
+      return null;
+    }
   },
 };
-
-// ============================================================
-// Documents API
-// ============================================================
 
 export const documentsApi = {
   async list(params: DocumentListParams = {}): Promise<DocumentListData> {
@@ -212,8 +323,6 @@ export const documentsApi = {
     });
   },
 };
-
-//ChatApi
 
 export const chatapi = {
   async ask(payload: AskQuestionRequest,): Promise<AskQuestionRequestData>{

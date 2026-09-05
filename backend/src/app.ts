@@ -1,15 +1,17 @@
 import express, { Request, Response } from "express";
 import morgan from "morgan";
 import cors from "cors";
-import helment from "helmet";
+import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import { config } from "./config/config.js";
 
 const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 app.use(morgan("dev"));
-app.use(helment());
+app.use(helmet());
 app.use(
   cors({
     origin: config.CORS_ORIGIN,

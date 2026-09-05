@@ -1,5 +1,21 @@
 import { Request, Response, NextFunction } from "express";
 
+const PASSWORD_MIN_LENGTH = 12;
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{12,}$/;
+
+function validatePassword(password: string, fieldName: string = "Password"): string | null {
+  if (!password || typeof password !== "string") {
+    return `${fieldName} is required.`;
+  }
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    return `${fieldName} must be at least ${PASSWORD_MIN_LENGTH} characters long.`;
+  }
+  if (!PASSWORD_REGEX.test(password)) {
+    return `${fieldName} must contain at least one uppercase letter, one lowercase letter, one number, and one special character.`;
+  }
+  return null;
+}
+
 export class AuthValidator {
   /**
    * Middleware to validate POST /api/auth/register payload
@@ -24,8 +40,9 @@ export class AuthValidator {
     }
 
     // 3. Password validation
-    if (!password || typeof password !== "string" || password.length < 6) {
-      errors.push("Password is required and must be at least 6 characters long.");
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      errors.push(passwordError);
     }
 
     // 4. Role rejection: public registration cannot specify role
@@ -68,7 +85,7 @@ export class AuthValidator {
       errors.push("A valid email address is required.");
     }
 
-    // 2. Password validation
+    // 2. Password validation (basic presence check for login)
     if (!password || typeof password !== "string" || password.trim().length === 0) {
       errors.push("Password is required.");
     }
@@ -90,4 +107,4 @@ export class AuthValidator {
   }
 }
 
-export default AuthValidator;
+export { validatePassword };

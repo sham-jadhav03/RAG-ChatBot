@@ -1,4 +1,3 @@
-import { AUTH_TOKEN_STORAGE_KEY } from "@/lib/api-client";
 import type { AuthUser } from "@/lib/types";
 
 export const AUTH_TOKEN_CHANGED_EVENT = "rag-chatbot-auth-token-changed";
@@ -6,13 +5,10 @@ export const AUTH_USER_STORAGE_KEY = "rag_chatbot_user";
 
 let cachedUserRaw: string | null = null;
 let cachedUser: AuthUser | null = null;
+let inMemoryAccessToken: string | null = null;
 
-export function getAuthToken(): string | null {
-    if (typeof window === "undefined") {
-        return null;
-    }
-
-    return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+export function getAccessToken(): string | null {
+    return inMemoryAccessToken;
 }
 
 export function getAuthUser(): AuthUser | null {
@@ -42,24 +38,38 @@ export function getAuthUser(): AuthUser | null {
     }
 }
 
-export function setAuthToken(token: string, user?: AuthUser): void {
-    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+export function setAccessToken(token: string | null): void {
+    inMemoryAccessToken = token;
+    if (token) {
+        window.dispatchEvent(new Event(AUTH_TOKEN_CHANGED_EVENT));
+    }
+}
+
+export function setAuthUser(user: AuthUser | null): void {
+    if (typeof window === "undefined") return;
+    
     if (user) {
         cachedUser = user;
         cachedUserRaw = JSON.stringify(user);
         localStorage.setItem(AUTH_USER_STORAGE_KEY, cachedUserRaw);
+    } else {
+        cachedUser = null;
+        cachedUserRaw = null;
+        localStorage.removeItem(AUTH_USER_STORAGE_KEY);
     }
     window.dispatchEvent(new Event(AUTH_TOKEN_CHANGED_EVENT));
 }
 
-export function removeAuthToken(): void {
+export function clearAuth(): void {
+    inMemoryAccessToken = null;
     cachedUser = null;
     cachedUserRaw = null;
-    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-    localStorage.removeItem(AUTH_USER_STORAGE_KEY);
-    window.dispatchEvent(new Event(AUTH_TOKEN_CHANGED_EVENT));
+    if (typeof window !== "undefined") {
+        localStorage.removeItem(AUTH_USER_STORAGE_KEY);
+        window.dispatchEvent(new Event(AUTH_TOKEN_CHANGED_EVENT));
+    }
 }
 
-export function hasAuthToken(): boolean {
-    return getAuthToken() !== null;
+export function hasAccessToken(): boolean {
+    return inMemoryAccessToken !== null;
 }

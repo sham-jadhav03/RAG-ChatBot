@@ -5,6 +5,7 @@ import {
   registerRateLimiter,
   loginRateLimiter,
 } from '../../middleware/rateLimiter.middleware.js';
+import { authenticate } from '../../middleware/auth.middleware.js';
 
 const router = express.Router();
 
@@ -20,6 +21,17 @@ router.post(
   loginRateLimiter,
   AuthValidator.validateLogin,
   authController.login,
+);
+
+router.post(
+  '/refresh',
+  authController.refresh,
+);
+
+router.post(
+  '/logout',
+  authenticate,
+  authController.logout,
 );
 
 export default router;

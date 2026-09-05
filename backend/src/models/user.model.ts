@@ -6,6 +6,7 @@ export interface IUser extends Document {
   email: string;
   password?: string;
   role: "admin" | "user";
+  refreshTokenHash?: string;
   createdAt: Date;
   updatedAt: Date;
 
@@ -39,6 +40,10 @@ const userSchema = new Schema<IUser>(
       type: String,
       enum: ["admin", "user"],
       default: "user",
+    },
+    refreshTokenHash: {
+      type: String,
+      select: false,
     },
   },
   { timestamps: true },
