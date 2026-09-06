@@ -18,6 +18,7 @@ _BACKOFF_FACTOR = 2.0
 _REDIS_SOCKET_TIMEOUT = 30.0         # read timeout (seconds)
 _REDIS_SOCKET_CONNECT_TIMEOUT = 10.0 # connect timeout (seconds)
 _REDIS_HEALTH_CHECK_INTERVAL = 15    # keepalive ping interval (seconds)
+_CHAT_PENDING_MIN_IDLE_MS = 60_000   # reclaim messages idle for at least one minute
 
 # Stream configuration
 CHAT_STREAM_KEY = "pdf_chat_requests"
@@ -36,6 +37,7 @@ class RedisWorker:
 
     def __init__(self):
         self.redis_client = None
+        self.pubsub_client = None
         self.pubsub = None
         self.publisher = None
         self._active_tasks = set()
@@ -60,6 +62,18 @@ class RedisWorker:
             # Test connection
             await self.redis_client.ping()
             logger.info(f"Connected to Redis: {config.REDIS_URL}")
+
+            # Pub/Sub uses an indefinite blocking read and must not inherit
+            # the finite command/stream socket read timeout.
+            self.pubsub_client = await redis.from_url(
+                config.REDIS_URL,
+                encoding="utf-8",
+                decode_responses=True,
+                socket_timeout=None,
+                socket_connect_timeout=_REDIS_SOCKET_CONNECT_TIMEOUT,
+                health_check_interval=_REDIS_HEALTH_CHECK_INTERVAL,
+            )
+            await self.pubsub_client.ping()
 
             # Separate client for publishing (Pub/Sub client cannot publish)
             self.publisher = await redis.from_url(
@@ -95,7 +109,7 @@ class RedisWorker:
     async def subscribe_to_channels(self):
         """Subscribe to all required Pub/Sub channels"""
         try:
-            self.pubsub = self.redis_client.pubsub()
+            self.pubsub = self.pubsub_client.pubsub()
             await self.pubsub.subscribe(*self.SUBSCRIBE_CHANNELS)
             logger.info(f"Subscribed to channels: {self.SUBSCRIBE_CHANNELS}")
         except Exception as e:
@@ -110,7 +124,12 @@ class RedisWorker:
         Close all Redis connections silently.
         Used before reconnect — errors are logged but not raised.
         """
-        for name, obj in [("pubsub", self.pubsub), ("redis_client", self.redis_client), ("publisher", self.publisher)]:
+        for name, obj in [
+            ("pubsub", self.pubsub),
+            ("pubsub_client", self.pubsub_client),
+            ("redis_client", self.redis_client),
+            ("publisher", self.publisher),
+        ]:
             if obj is None:
                 continue
             try:
@@ -120,6 +139,7 @@ class RedisWorker:
             except Exception as e:
                 logger.debug(f"Ignored error closing {name}: {e}")
         self.pubsub = None
+        self.pubsub_client = None
         self.redis_client = None
         self.publisher = None
 
@@ -156,6 +176,13 @@ class RedisWorker:
                 except Exception:
                     pass
                 logger.info("PubSub closed")
+
+            if self.pubsub_client:
+                try:
+                    await self.pubsub_client.close()
+                except Exception:
+                    pass
+                logger.info("PubSub client closed")
 
             if self.redis_client:
                 try:
@@ -521,6 +548,41 @@ class RedisWorker:
                 f"Unknown message type '{message_type}' on channel '{channel}'"
             )
 
+    async def _process_chat_stream_message(self, message_id, message_data):
+        """Process one chat stream entry and acknowledge it after success."""
+        try:
+            message_type = message_data.get("type")
+
+            if message_type == "ask_question":
+                await self.route_message("pdf_chat_requests", message_data)
+
+            await self.redis_client.xack(CHAT_STREAM_KEY, CHAT_CONSUMER_GROUP, message_id)
+        except Exception as e:
+            logger.error(f"Error processing chat stream message {message_id}: {e}", exc_info=True)
+            # Do not ACK failed entries; they remain pending for recovery.
+
+    async def _claim_stale_chat_messages(self):
+        """Reclaim stale pending chat entries for this consumer."""
+        start_id = "0-0"
+
+        while True:
+            next_start_id, messages, _ = await self.redis_client.xautoclaim(
+                CHAT_STREAM_KEY,
+                CHAT_CONSUMER_GROUP,
+                self._chat_stream_consumer_name,
+                min_idle_time=_CHAT_PENDING_MIN_IDLE_MS,
+                start_id=start_id,
+                count=10,
+            )
+
+            for message_id, message_data in messages:
+                await self._process_chat_stream_message(message_id, message_data)
+
+            if next_start_id == "0-0" or not messages:
+                return
+
+            start_id = next_start_id
+
     async def _process_chat_stream_messages(self):
         """
         Process messages from the chat stream using XREADGROUP.
@@ -530,6 +592,8 @@ class RedisWorker:
         
         while True:
             try:
+                await self._claim_stale_chat_messages()
+
                 # Read from stream with consumer group
                 # block=5000ms to allow periodic check for shutdown
                 messages = await self.redis_client.xreadgroup(
@@ -545,20 +609,7 @@ class RedisWorker:
                 
                 for stream_name, stream_messages in messages:
                     for message_id, message_data in stream_messages:
-                        try:
-                            # message_data is already decoded dict from decode_responses=True
-                            message_type = message_data.get("type")
-                            
-                            if message_type == "ask_question":
-                                await self.route_message("pdf_chat_requests", message_data)
-                            
-                            # ACK the message after successful processing
-                            await self.redis_client.xack(CHAT_STREAM_KEY, CHAT_CONSUMER_GROUP, message_id)
-                            
-                        except Exception as e:
-                            logger.error(f"Error processing chat stream message {message_id}: {e}", exc_info=True)
-                            # Don't ACK on error - message will be redelivered
-                            # Optionally: implement dead letter queue after max retries
+                        await self._process_chat_stream_message(message_id, message_data)
                             
             except asyncio.CancelledError:
                 logger.info("Chat stream consumer cancelled")
