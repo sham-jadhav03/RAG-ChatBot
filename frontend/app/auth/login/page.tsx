@@ -4,11 +4,17 @@ import { useAuth } from "@/components/hooks/useAuth";
 import { ApiError } from "@/lib/api-client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 export default function LoginPage() {
     const router = useRouter();
-    const { login } = useAuth();
+    const { login, isAuthenticated, isLoading, user } = useAuth();
+
+    useEffect(() => {
+        if (!isLoading && isAuthenticated) {
+            router.replace(user?.role === "admin" ? "/admin" : "/");
+        }
+    }, [isAuthenticated, isLoading, router, user]);
 
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -37,6 +43,14 @@ export default function LoginPage() {
         } finally {
             setIsSubmitting(false);
         }
+    }
+
+    if (isLoading || isAuthenticated) {
+        return (
+            <main className="flex min-h-screen items-center justify-center">
+                <p className="text-sm text-muted-foreground">Checking authentication...</p>
+            </main>
+        );
     }
 
     return (
@@ -117,7 +131,7 @@ export default function LoginPage() {
                 </form>
 
                 <p className="mt-4 text-center text-sm text-muted-foreground">
-                    Don't have an account?{" "}
+                    Don&apos;t have an account?{" "}
                     <Link href="/auth/register" className="font-medium text-primary hover:underline">
                         Register
                     </Link>

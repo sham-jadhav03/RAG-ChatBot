@@ -1,6 +1,12 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+const cookieSameSite = process.env.COOKIE_SAME_SITE === "none"
+  ? "none"
+  : process.env.COOKIE_SAME_SITE === "lax"
+    ? "lax"
+    : "strict";
+
 if (!process.env.MONGO_URI) {
   throw new Error("MONGO_URI is required in environmental variable");
 }
@@ -66,6 +72,7 @@ export const config = {
   IMAGEKIT_URL_ENDPOINT: process.env.IMAGEKIT_URL_ENDPOINT,
   REDIS_URL: process.env.REDIS_URL,
   CORS_ORIGIN: process.env.CORS_ORIGIN,
+  COOKIE_SAME_SITE: cookieSameSite,
   INITIAL_ADMIN_USERNAME: process.env.INITIAL_ADMIN_USERNAME,
   INITIAL_ADMIN_PASSWORD: process.env.INITIAL_ADMIN_PASSWORD,
   INITIAL_ADMIN_EMAIL: process.env.INITIAL_ADMIN_EMAIL,

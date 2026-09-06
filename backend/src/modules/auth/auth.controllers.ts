@@ -1,5 +1,13 @@
 import { Request, Response, NextFunction } from "express";
 import authService from "./auth.service.js";
+import { config } from "../../config/config.js";
+
+const refreshCookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production" || config.COOKIE_SAME_SITE === "none",
+  sameSite: config.COOKIE_SAME_SITE as "strict" | "lax" | "none",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+};
 
 interface RefreshRequest extends Request {
   body: {
@@ -34,12 +42,7 @@ export async function register(req: Request, res: Response, next: NextFunction):
     });
 
     // Set refresh token as HttpOnly cookie
-    res.cookie("refreshToken", result.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    res.cookie("refreshToken", result.refreshToken, refreshCookieOptions);
 
     res.status(201).json({
       success: true,
@@ -73,12 +76,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     const result = await authService.login({ email, password });
 
     // Set refresh token as HttpOnly cookie
-    res.cookie("refreshToken", result.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    res.cookie("refreshToken", result.refreshToken, refreshCookieOptions);
 
     res.status(200).json({
       success: true,
@@ -113,12 +111,7 @@ export async function refresh(req: RefreshRequest, res: Response, next: NextFunc
     const result = await authService.refresh({ refreshToken });
 
     // Set new refresh token as HttpOnly cookie
-    res.cookie("refreshToken", result.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    res.cookie("refreshToken", result.refreshToken, refreshCookieOptions);
 
     res.status(200).json({
       success: true,
@@ -130,11 +123,7 @@ export async function refresh(req: RefreshRequest, res: Response, next: NextFunc
     });
   } catch (error: any) {
     // Clear invalid cookie
-    res.clearCookie("refreshToken", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-    });
+    res.clearCookie("refreshToken", refreshCookieOptions);
 
     res.status(401).json({
       success: false,
@@ -155,11 +144,7 @@ export async function logout(req: LogoutRequest, res: Response, next: NextFuncti
     }
 
     // Clear refresh token cookie
-    res.clearCookie("refreshToken", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-    });
+    res.clearCookie("refreshToken", refreshCookieOptions);
 
     res.status(200).json({
       success: true,

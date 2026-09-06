@@ -4,12 +4,18 @@ import { useAuth } from "@/components/hooks/useAuth";
 import { ApiError } from "@/lib/api-client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 export default function RegisterPage() {
     const router = useRouter();
 
-    const { register } = useAuth();
+    const { register, isAuthenticated, isLoading, user } = useAuth();
+
+    useEffect(() => {
+        if (!isLoading && isAuthenticated) {
+            router.replace(user?.role === "admin" ? "/admin" : "/");
+        }
+    }, [isAuthenticated, isLoading, router, user]);
 
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -24,12 +30,12 @@ export default function RegisterPage() {
         setIsSubmitting(true);
 
         try {
-            await register({
+            const response = await register({
                 username,
                 email,
                 password,
             });
-            router.replace("/");
+            router.replace(response.user.role === "admin" ? "/admin" : "/");
         } catch (error) {
             if (error instanceof ApiError) {
                 setError(error.message);
@@ -40,6 +46,14 @@ export default function RegisterPage() {
             setIsSubmitting(false);
         }
     };
+
+    if (isLoading || isAuthenticated) {
+        return (
+            <main className="flex min-h-screen items-center justify-center">
+                <p className="text-sm text-muted-foreground">Checking authentication...</p>
+            </main>
+        );
+    }
 
     return (
         <main className="flex min-h-screen items-center justify-center p-6">

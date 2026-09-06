@@ -29,7 +29,7 @@ export interface AuthUser {
 
 export interface AuthResponseData {
   user: AuthUser;
-  token: string;
+  accessToken: string;
 }
 
 export interface LoginRequest {

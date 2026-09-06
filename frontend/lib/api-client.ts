@@ -12,7 +12,7 @@ import type {
   RegisterRequest,
   ConversationListData,
 } from "@/lib/types";
-import { getAccessToken, setAccessToken } from "@/lib/auth";
+import { getAccessToken, setAccessToken, setAuthUser } from "@/lib/auth";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
@@ -92,7 +92,7 @@ async function refreshAccessToken(): Promise<string | null> {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
         method: "POST",
-        credentials: "include", // Include HttpOnly cookie
+        credentials: "include",
       });
 
       if (!response.ok) {
@@ -101,7 +101,6 @@ async function refreshAccessToken(): Promise<string | null> {
 
       const body = await response.json();
       if (body.success && body.data?.accessToken) {
-        setAccessToken(body.data.accessToken);
         return body.data.accessToken;
       }
       return null;
@@ -123,13 +122,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
 
-  // Use in-memory access token
   const accessToken = getAccessToken();
   if (accessToken) {
     headers.set("Authorization", `Bearer ${accessToken}`);
   }
 
-  // Always include credentials for HttpOnly cookie (refresh token)
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
@@ -147,18 +144,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     );
   }
 
-  // Handle 401 - try to refresh access token
   if (response.status === 401) {
     const newToken = await refreshAccessToken();
     if (newToken) {
-      // Retry the original request with new token
       headers.set("Authorization", `Bearer ${newToken}`);
       const retryResponse = await fetch(`${API_BASE_URL}${path}`, {
         ...options,
         headers,
         credentials: "include",
       });
-      
+
       let retryBody: ApiSuccessBody<T> | ApiErrorBody | undefined;
       try {
         retryBody = await retryResponse.json();
@@ -177,7 +172,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
       return retryBody.data as T;
     }
-    // Refresh failed, throw unauthorized
     throw new UnauthorizedError("Session expired. Please log in again.");
   }
 
@@ -188,22 +182,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     switch (response.status) {
       case 400:
         throw new BadRequestError(message, errorBody);
-
       case 404:
         throw new NotFoundError(message, errorBody);
-
       case 409:
         throw new ConflictError(message, errorBody);
-
       case 502:
         throw new AiServiceError(message, errorBody);
-
       case 503:
         throw new ServiceUnavailableError(message, errorBody);
-
       case 504:
         throw new TimeoutError(message, errorBody);
-
       default:
         throw new ApiError(message, response.status, errorBody);
     }
@@ -222,14 +210,14 @@ export const authApi = {
     });
 
     const body = await response.json();
-    
+
     if (!response.ok || !body.success) {
       throw new UnauthorizedError(body.message || "Login failed");
     }
 
-    // Store access token in memory
     if (body.data?.accessToken) {
       setAccessToken(body.data.accessToken);
+      setAuthUser(body.data.user);
     }
 
     return body.data as AuthResponseData;
@@ -244,14 +232,14 @@ export const authApi = {
     });
 
     const body = await response.json();
-    
+
     if (!response.ok || !body.success) {
       throw new BadRequestError(body.message || "Registration failed");
     }
 
-    // Store access token in memory
     if (body.data?.accessToken) {
       setAccessToken(body.data.accessToken);
+      setAuthUser(body.data.user);
     }
 
     return body.data as AuthResponseData;
@@ -265,7 +253,7 @@ export const authApi = {
       });
 
       const body = await response.json();
-      
+
       if (!response.ok || !body.success || !body.data?.accessToken) {
         return null;
       }
@@ -274,6 +262,17 @@ export const authApi = {
       return { accessToken: body.data.accessToken, user: body.data.user };
     } catch {
       return null;
+    }
+  },
+
+  async logout(): Promise<void> {
+    try {
+      await fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // Ignore errors
     }
   },
 };

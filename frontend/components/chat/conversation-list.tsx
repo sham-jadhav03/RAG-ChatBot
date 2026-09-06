@@ -1,8 +1,7 @@
 "use client";
 
-import { FileText, MessageSquare, MoreHorizontal, Trash2 } from "lucide-react";
+import { FileText, MessageSquare, Trash2 } from "lucide-react";
 import { useState } from "react";
-import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import type { ConversationEntry } from "@/lib/types";
 
@@ -10,7 +9,6 @@ interface ConversationListProps {
   conversations: ConversationEntry[];
   currentSessionId: string | null;
   onSelect: (sessionId: string, documentId: string) => void;
-  onNew: (documentId: string) => void;
   onDelete?: (sessionId: string) => void;
   isLoading?: boolean;
   emptyMessage?: string;
@@ -20,7 +18,6 @@ export function ConversationList({
   conversations,
   currentSessionId,
   onSelect,
-  onNew,
   onDelete,
   isLoading = false,
   emptyMessage = "No conversations yet. Start a new one!",

@@ -4,7 +4,6 @@ import { Loader2, LogOut, MessageSquare, Plus, Shield } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
 
 import { ChatHistory } from "@/components/chat/chat-history";
 import { ConversationList } from "@/components/chat/conversation-list";
@@ -14,7 +13,7 @@ import { useAuth } from "@/components/hooks/useAuth";
 import { useChat } from "@/components/hooks/useChat";
 import { useChatHistory } from "@/components/hooks/useChatHistory";
 import { useConversations } from "@/components/hooks/useConversations";
-import { getOrCreateSession, getAllSessions, resetSession } from "@/lib/session";
+import { getOrCreateSession, resetSession } from "@/lib/session";
 import type { Document } from "@/lib/types";
 
 export function ChatWindow() {
@@ -43,7 +42,6 @@ export function ChatWindow() {
   const {
     data: conversationsData,
     isLoading: isConversationsLoading,
-    isError: isConversationsError,
     refetch: refetchConversations,
   } = useConversations(1, 20);
 
@@ -103,7 +101,7 @@ export function ChatWindow() {
     }
   }
 
-  function handleConversationDelete(sessionId: string) {
+  function handleConversationDelete() {
     // Could implement delete API call here
     refetchConversations();
   }
@@ -223,7 +221,6 @@ export function ChatWindow() {
                       conversations={conversations}
                       currentSessionId={sessionId}
                       onSelect={handleConversationSelect}
-                      onNew={handleNewConversation}
                       onDelete={handleConversationDelete}
                       isLoading={isConversationsLoading}
                       emptyMessage="No conversations yet. Start a new one!"
